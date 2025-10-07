@@ -15,6 +15,9 @@ build/icon.svg.png
 *.log
 logs/
 
+# Development notes
+TASKS.md
+
 # macOS
 .DS_Store
 
