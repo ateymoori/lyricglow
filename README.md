@@ -16,10 +16,10 @@ Always-on-top lyrics overlay with word-by-word glow effects, artist biography, a
 ### 📦 Download Free macOS App
 
 <a href="https://github.com/ateymoori/lyricglow/releases/latest/download/LyricGlow.dmg">
-  <img src="https://img.shields.io/badge/Download%20Now-LyricGlow%20v0.1.4%20(Apple%20Silicon)-00b8ff?style=for-the-badge&logo=apple&logoColor=white" alt="Download LyricGlow synchronized lyrics app for macOS">
+  <img src="https://img.shields.io/badge/Download%20Now-LyricGlow%20v0.1.5%20(Universal)-00b8ff?style=for-the-badge&logo=apple&logoColor=white" alt="Download LyricGlow synchronized lyrics app for macOS">
 </a>
 
-**Free & Open Source** • **macOS 11.0+ Big Sur** • **Apple Silicon M1/M2/M3**
+**Free & Open Source** • **macOS 11.0+ Big Sur** • **Universal (Apple Silicon & Intel)**
 
 [📥 All Releases](https://github.com/ateymoori/lyricglow/releases) • [🐛 Report Bug](https://github.com/ateymoori/lyricglow/issues) • [✨ Request Feature](https://github.com/ateymoori/lyricglow/issues) • [💬 Discussions](https://github.com/ateymoori/lyricglow/discussions)
 
@@ -108,7 +108,7 @@ Always-on-top lyrics overlay with word-by-word glow effects, artist biography, a
 
 **System Requirements:**
 - macOS 11.0 Big Sur or later (macOS 12 Monterey, macOS 13 Ventura, macOS 14 Sonoma supported)
-- Apple Silicon (M1/M2/M3 chip) recommended, Intel x86_64 compatible
+- Universal Binary: Apple Silicon (M1/M2/M3/M4) and Intel (x86_64) compatible
 - 100 MB free disk space
 - Active internet connection for lyrics and metadata fetching
 
@@ -172,7 +172,7 @@ npm run release
 ```bash
 npm start              # Launch Electron app in development mode
 npm run dev            # Launch with debug console logging enabled
-npm run dist:mac       # Build production DMG for macOS Apple Silicon
+npm run dist:mac       # Build universal DMG for macOS (Apple Silicon + Intel)
 npm run pack           # Package app without creating installer (for testing)
 npm run release        # Auto bump version, build DMG, generate release notes
 ```

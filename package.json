@@ -1,6 +1,6 @@
 {
   "name": "lyricglow",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Real-time synchronized lyrics and music metadata display for macOS.",
   "main": "app/main.js",
   "scripts": {
@@ -8,7 +8,7 @@
     "dev": "ELECTRON_ENABLE_LOGGING=1 electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac --arm64",
+    "dist:mac": "electron-builder --mac",
     "release": "bash scripts/release.sh"
   },
   "keywords": [
