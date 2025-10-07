@@ -1,0 +1,43 @@
+appId: com.lyricglow.app
+productName: LyricGlow
+directories:
+  buildResources: build
+  output: dist
+files:
+  - app/**/*
+  - .env
+  - node_modules/**/*
+  - package.json
+extraResources:
+  - from: build/iconTemplate.png
+    to: iconTemplate.png
+  - from: build/iconTemplate@2x.png
+    to: iconTemplate@2x.png
+mac:
+  category: public.app-category.music
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSAppleEventsUsageDescription: "This app needs to access music players to display currently playing tracks."
+    LSUIElement: true
+dmg:
+  title: ${productName} ${version}
+  icon: build/icon.icns
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+  window:
+    width: 540
+    height: 380

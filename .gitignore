@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+native/.module-cache/
+native/bin/
+*.dmg
+*.blockmap
+build/icon.iconset/
+build/icon.svg.png
+
+# Cache and Logs
+.cache/
+*.log
+logs/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Environment (contains API keys and secrets)
+.env
+.env.local
+.env.*.local
