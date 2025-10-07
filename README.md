@@ -15,7 +15,7 @@ Always-on-top lyrics overlay with word-by-word glow effects, artist biography, a
 
 ### 📦 Download Free macOS App
 
-<a href="https://github.com/ateymoori/lyricglow/releases/latest/download/LyricGlow-0.1.4-arm64.dmg">
+<a href="https://github.com/ateymoori/lyricglow/releases/latest/download/LyricGlow.dmg">
   <img src="https://img.shields.io/badge/Download%20Now-LyricGlow%20v0.1.4%20(Apple%20Silicon)-00b8ff?style=for-the-badge&logo=apple&logoColor=white" alt="Download LyricGlow synchronized lyrics app for macOS">
 </a>
 
@@ -100,7 +100,7 @@ Always-on-top lyrics overlay with word-by-word glow effects, artist biography, a
 
 **Quick Install Steps:**
 
-1. **[📥 Download LyricGlow-0.1.4-arm64.dmg](https://github.com/ateymoori/lyricglow/releases/latest)** (94 MB DMG installer for Apple Silicon)
+1. **[📥 Download LyricGlow.dmg](https://github.com/ateymoori/lyricglow/releases/latest)** from the latest release
 2. **Open DMG File** - Double-click the downloaded `.dmg` file to mount the disk image
 3. **Drag to Applications** - Drag LyricGlow icon to your Applications folder
 4. **Launch App** - Open from Applications folder or use Spotlight Search (⌘+Space → type "LyricGlow")
