@@ -607,21 +607,23 @@ ipcMain.on('spotify:logout', () => {
   }
 });
 
-ipcMain.handle('cache:list', () => {
+ipcMain.handle('cache:list', async () => {
   const entries = unifiedCache.listAllEntries();
-  const enriched = entries.map(entry => ({
-    ...entry,
-    size: unifiedCache.getEntrySize(entry.type, entry.key)
-  }));
+  const enriched = await Promise.all(
+    entries.map(async entry => ({
+      ...entry,
+      size: await unifiedCache.getEntrySize(entry.type, entry.key)
+    }))
+  );
   return enriched;
 });
 
-ipcMain.handle('cache:delete', (_event, type, key) => {
-  return unifiedCache.deleteOne(type, key);
+ipcMain.handle('cache:delete', async (_event, type, key) => {
+  return await unifiedCache.deleteOne(type, key);
 });
 
-ipcMain.handle('cache:clear-all', () => {
-  unifiedCache.clearAll();
+ipcMain.handle('cache:clear-all', async () => {
+  await unifiedCache.clearAll();
   return true;
 });
 

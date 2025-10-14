@@ -20,6 +20,30 @@ const elements = {
 // Progress bar seeking functionality
 let isDragging = false;
 let progressBarContainer = null;
+let pendingSeekPosition = null;
+
+function updateSeekUI(e) {
+  if (!currentMusicData || !currentMusicData.duration) return;
+
+  const rect = progressBarContainer.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const percentage = Math.max(0, Math.min(1, clickX / rect.width));
+  const newPosition = percentage * currentMusicData.duration;
+
+  pendingSeekPosition = newPosition;
+  internalPosition = newPosition;
+  lastSyncTime = Date.now();
+
+  elements.progressBar.style.width = `${percentage * 100}%`;
+  elements.currentTime.textContent = formatTime(newPosition);
+}
+
+function commitSeek() {
+  if (pendingSeekPosition !== null) {
+    window.musicAPI.seek(pendingSeekPosition);
+    pendingSeekPosition = null;
+  }
+}
 
 function initProgressBarSeek() {
   progressBarContainer = document.querySelector('.progress-bar');
@@ -28,40 +52,27 @@ function initProgressBarSeek() {
 
   progressBarContainer.addEventListener('click', (e) => {
     if (!currentMusicData || !currentMusicData.duration) return;
-    seekToPosition(e);
+    updateSeekUI(e);
+    commitSeek();
   });
 
   progressBarContainer.addEventListener('mousedown', (e) => {
     if (!currentMusicData || !currentMusicData.duration) return;
     isDragging = true;
-    seekToPosition(e);
+    updateSeekUI(e);
   });
 
   document.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
-    seekToPosition(e);
+    updateSeekUI(e);
   });
 
   document.addEventListener('mouseup', () => {
-    isDragging = false;
+    if (isDragging) {
+      commitSeek();
+      isDragging = false;
+    }
   });
-}
-
-function seekToPosition(e) {
-  if (!currentMusicData || !currentMusicData.duration) return;
-
-  const rect = progressBarContainer.getBoundingClientRect();
-  const clickX = e.clientX - rect.left;
-  const percentage = Math.max(0, Math.min(1, clickX / rect.width));
-  const newPosition = percentage * currentMusicData.duration;
-
-  internalPosition = newPosition;
-  lastSyncTime = Date.now();
-
-  elements.progressBar.style.width = `${percentage * 100}%`;
-  elements.currentTime.textContent = formatTime(newPosition);
-
-  window.musicAPI.seek(newPosition);
 }
 
 function updatePlayPauseButton(isPlaying) {
@@ -720,13 +731,13 @@ class MetadataHandler {
     }
 
     // Cache all images and filter out failed ones
-    const cachedImages = [];
-    for (const imageUrl of validImages) {
-      const cachedImage = await window.musicAPI.cacheImage(imageUrl);
-      if (cachedImage) {
-        cachedImages.push({ url: imageUrl, cached: cachedImage });
-      }
-    }
+    const imageResults = await Promise.all(
+      validImages.map(url => window.musicAPI.cacheImage(url))
+    );
+
+    const cachedImages = validImages
+      .map((url, i) => ({ url, cached: imageResults[i] }))
+      .filter(item => item.cached);
 
     // Only proceed if we have valid cached images
     if (cachedImages.length === 0) {

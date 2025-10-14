@@ -38,9 +38,9 @@ class UnifiedCacheManager {
     return {};
   }
 
-  saveIndex() {
+  async saveIndex() {
     try {
-      fs.writeFileSync(this.indexPath, JSON.stringify(this.index, null, 2));
+      await fs.promises.writeFile(this.indexPath, JSON.stringify(this.index, null, 2));
     } catch (error) {
       Logger.cache.error('Failed to save cache index', error);
     }
@@ -109,7 +109,10 @@ class UnifiedCacheManager {
     if (!entry) return null;
 
     const filePath = this.getCacheFilePath(type, key);
-    if (!fs.existsSync(filePath)) {
+
+    try {
+      await fs.promises.access(filePath);
+    } catch {
       delete this.index[type][hash];
       this.saveIndex();
       return null;
@@ -123,10 +126,11 @@ class UnifiedCacheManager {
 
     try {
       if (type === 'images') {
-        const buffer = fs.readFileSync(filePath);
+        const buffer = await fs.promises.readFile(filePath);
         return `data:image/jpeg;base64,${buffer.toString('base64')}`;
       } else {
-        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const content = await fs.promises.readFile(filePath, 'utf8');
+        return JSON.parse(content);
       }
     } catch (error) {
       Logger.cache.error(`Read failed for ${type}/${key}`, error);
@@ -134,7 +138,7 @@ class UnifiedCacheManager {
     }
   }
 
-  set(type, key, data) {
+  async set(type, key, data) {
     if (!data) return false;
 
     try {
@@ -145,14 +149,14 @@ class UnifiedCacheManager {
         if (typeof data === 'string' && data.startsWith('data:image')) {
           const base64Data = data.split(',')[1];
           const buffer = Buffer.from(base64Data, 'base64');
-          fs.writeFileSync(filePath, buffer);
+          await fs.promises.writeFile(filePath, buffer);
         } else if (Buffer.isBuffer(data)) {
-          fs.writeFileSync(filePath, data);
+          await fs.promises.writeFile(filePath, data);
         } else {
           return false;
         }
       } else {
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2));
       }
 
       if (!this.index[type]) {
@@ -180,28 +184,28 @@ class UnifiedCacheManager {
     let clearedCount = 0;
     const now = Date.now();
 
-    Object.keys(this.index).forEach(type => {
-      Object.keys(this.index[type]).forEach(hash => {
+    for (const type of Object.keys(this.index)) {
+      for (const hash of Object.keys(this.index[type])) {
         const entry = this.index[type][hash];
         const age = now - entry.timestamp;
 
         if (age > this.cacheExpiry) {
           const filePath = path.join(this.cacheRoot, type, entry.file);
           try {
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-            }
+            await fs.promises.unlink(filePath);
             delete this.index[type][hash];
             clearedCount++;
           } catch (error) {
-            Logger.cache.error('Failed to delete expired cache file', error);
+            if (error.code !== 'ENOENT') {
+              Logger.cache.error('Failed to delete expired cache file', error);
+            }
           }
         }
-      });
-    });
+      }
+    }
 
     if (clearedCount > 0) {
-      this.saveIndex();
+      await this.saveIndex();
       Logger.cache.info(`Cleared ${clearedCount} expired cache entries`);
     }
   }
@@ -232,23 +236,23 @@ class UnifiedCacheManager {
     return stats;
   }
 
-  clearAll() {
-    Object.keys(this.index).forEach(type => {
-      Object.keys(this.index[type]).forEach(hash => {
+  async clearAll() {
+    for (const type of Object.keys(this.index)) {
+      for (const hash of Object.keys(this.index[type])) {
         const entry = this.index[type][hash];
         const filePath = path.join(this.cacheRoot, type, entry.file);
         try {
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
+          await fs.promises.unlink(filePath);
         } catch (error) {
-          Logger.cache.error('Failed to delete cache file', error);
+          if (error.code !== 'ENOENT') {
+            Logger.cache.error('Failed to delete cache file', error);
+          }
         }
-      });
-    });
+      }
+    }
 
     this.index = {};
-    this.saveIndex();
+    await this.saveIndex();
     Logger.cache.info('Cache cleared completely');
   }
 
@@ -269,20 +273,20 @@ class UnifiedCacheManager {
     return entries;
   }
 
-  getEntrySize(type, key) {
+  async getEntrySize(type, key) {
     const filePath = this.getCacheFilePath(type, key);
     try {
-      if (fs.existsSync(filePath)) {
-        const stats = fs.statSync(filePath);
-        return stats.size;
-      }
+      const stats = await fs.promises.stat(filePath);
+      return stats.size;
     } catch (error) {
-      Logger.cache.error('Failed to get file size', error);
+      if (error.code !== 'ENOENT') {
+        Logger.cache.error('Failed to get file size', error);
+      }
+      return 0;
     }
-    return 0;
   }
 
-  deleteOne(type, key) {
+  async deleteOne(type, key) {
     const hash = this.generateHash(key);
     if (!this.index[type] || !this.index[type][hash]) {
       return false;
@@ -290,14 +294,14 @@ class UnifiedCacheManager {
 
     const filePath = this.getCacheFilePath(type, key);
     try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
+      await fs.promises.unlink(filePath);
       delete this.index[type][hash];
-      this.saveIndex();
+      await this.saveIndex();
       return true;
     } catch (error) {
-      Logger.cache.error('Failed to delete cache entry', error);
+      if (error.code !== 'ENOENT') {
+        Logger.cache.error('Failed to delete cache entry', error);
+      }
       return false;
     }
   }

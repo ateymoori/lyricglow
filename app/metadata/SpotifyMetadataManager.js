@@ -9,7 +9,7 @@ class SpotifyMetadataManager {
   }
 
   // Make authenticated request to Spotify API
-  async makeRequest(endpoint) {
+  async makeRequest(endpoint, timeoutMs = 10000) {
     const accessToken = await this.auth.getAccessToken();
 
     if (!accessToken) {
@@ -25,7 +25,8 @@ class SpotifyMetadataManager {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: timeoutMs
       };
 
       const req = https.request(options, (res) => {
@@ -52,8 +53,18 @@ class SpotifyMetadataManager {
         });
       });
 
+      req.on('timeout', () => {
+        Logger.metadata.error('Spotify request timeout', { endpoint, timeout: timeoutMs });
+        req.destroy();
+        resolve(null);
+      });
+
       req.on('error', (error) => {
-        Logger.metadata.error('Spotify request failed', error);
+        if (error.code === 'ECONNRESET') {
+          Logger.metadata.error('Spotify request timeout', error);
+        } else {
+          Logger.metadata.error('Spotify request failed', error);
+        }
         resolve(null);
       });
 

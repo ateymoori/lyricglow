@@ -18,9 +18,17 @@ class SecureFetch {
    * @returns {Promise<Response>}
    */
   async fetch(url, options = {}) {
-    // First attempt: Secure (SSL verification ON)
+    const timeoutMs = options.timeout || 10000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
-      const response = await this._fetchSecure(url, options);
+      const response = await this._fetchSecure(url, {
+        ...options,
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
 
       if (!this.hasTestedConnection) {
         Logger.app.info('Secure connection successful (SSL verification enabled)');
@@ -29,13 +37,27 @@ class SecureFetch {
 
       return response;
     } catch (error) {
-      // Check if it's an SSL error
+      clearTimeout(timeoutId);
+
+      if (error.name === 'AbortError') {
+        const timeoutError = new Error(`Request timeout after ${timeoutMs}ms`);
+        Logger.app.error('Request timeout', { url, timeout: timeoutMs });
+        throw timeoutError;
+      }
+
       if (this._isSSLError(error)) {
         Logger.app.warn('SSL verification failed, retrying with bypass (corporate VPN detected)');
 
-        // Second attempt: Insecure (SSL verification OFF)
+        const retryController = new AbortController();
+        const retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs);
+
         try {
-          const response = await this._fetchInsecure(url, options);
+          const response = await this._fetchInsecure(url, {
+            ...options,
+            signal: retryController.signal
+          });
+
+          clearTimeout(retryTimeoutId);
 
           if (!this.sslBypassEnabled) {
             Logger.app.info('Connection successful with SSL bypass (corporate VPN mode)');
@@ -44,12 +66,19 @@ class SecureFetch {
 
           return response;
         } catch (fallbackError) {
+          clearTimeout(retryTimeoutId);
+
+          if (fallbackError.name === 'AbortError') {
+            const timeoutError = new Error(`Request timeout after ${timeoutMs}ms`);
+            Logger.app.error('Request timeout on SSL bypass', { url, timeout: timeoutMs });
+            throw timeoutError;
+          }
+
           Logger.app.error('Both secure and insecure connection attempts failed', fallbackError);
           throw fallbackError;
         }
       }
 
-      // Not an SSL error, throw original error
       throw error;
     }
   }
