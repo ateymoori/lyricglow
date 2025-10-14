@@ -1,4 +1,4 @@
-const https = require('https');
+const secureFetch = require('../utils/SecureFetch');
 
 class LyricsManager {
   constructor(cache) {
@@ -24,49 +24,42 @@ class LyricsManager {
   }
 
   async fetchFromAPI(title, artist) {
-    return new Promise((resolve) => {
+    try {
       const query = encodeURIComponent(`${title} ${artist}`);
       const url = `https://lrclib.net/api/search?q=${query}`;
 
-      https.get(url, (response) => {
-        let data = '';
-
-        response.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        response.on('end', () => {
-          try {
-            const results = JSON.parse(data);
-
-            if (!results || results.length === 0) {
-              resolve(null);
-              return;
-            }
-
-            const exactMatch = this.findBestMatch(results, title, artist);
-
-            if (exactMatch && exactMatch.syncedLyrics) {
-              resolve({
-                synced: exactMatch.syncedLyrics,
-                plain: exactMatch.plainLyrics,
-                instrumental: exactMatch.instrumental
-              });
-            } else {
-              resolve(null);
-            }
-          } catch (error) {
-            resolve(null);
-          }
-        });
-
-        response.on('error', () => {
-          resolve(null);
-        });
-      }).on('error', () => {
-        resolve(null);
+      // Use smart fetch with SSL fallback
+      const response = await secureFetch.fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'LyricGlow/1.0'
+        }
       });
-    });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const results = await response.json();
+
+      if (!results || results.length === 0) {
+        return null;
+      }
+
+      const exactMatch = this.findBestMatch(results, title, artist);
+
+      if (exactMatch && exactMatch.syncedLyrics) {
+        return {
+          synced: exactMatch.syncedLyrics,
+          plain: exactMatch.plainLyrics,
+          instrumental: exactMatch.instrumental
+        };
+      }
+
+      return null;
+    } catch (error) {
+      return null;
+    }
   }
 
   findBestMatch(results, title, artist) {

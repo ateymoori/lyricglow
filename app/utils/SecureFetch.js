@@ -1,0 +1,121 @@
+const https = require('https');
+const Logger = require('./Logger');
+
+/**
+ * Smart fetch with SSL fallback for corporate VPN compatibility
+ * Tries secure connection first, falls back to insecure if SSL fails
+ */
+class SecureFetch {
+  constructor() {
+    this.sslBypassEnabled = false;
+    this.hasTestedConnection = false;
+  }
+
+  /**
+   * Fetch with automatic SSL fallback
+   * @param {string} url - URL to fetch
+   * @param {object} options - Fetch options
+   * @returns {Promise<Response>}
+   */
+  async fetch(url, options = {}) {
+    // First attempt: Secure (SSL verification ON)
+    try {
+      const response = await this._fetchSecure(url, options);
+
+      if (!this.hasTestedConnection) {
+        Logger.app.info('✅ Secure connection successful (SSL verification enabled)');
+        this.hasTestedConnection = true;
+      }
+
+      return response;
+    } catch (error) {
+      // Check if it's an SSL error
+      if (this._isSSLError(error)) {
+        Logger.app.warn('⚠️  SSL verification failed, retrying with bypass (corporate VPN detected)');
+
+        // Second attempt: Insecure (SSL verification OFF)
+        try {
+          const response = await this._fetchInsecure(url, options);
+
+          if (!this.sslBypassEnabled) {
+            Logger.app.info('✅ Connection successful with SSL bypass (corporate VPN mode)');
+            this.sslBypassEnabled = true;
+          }
+
+          return response;
+        } catch (fallbackError) {
+          Logger.app.error('❌ Both secure and insecure connection attempts failed', fallbackError);
+          throw fallbackError;
+        }
+      }
+
+      // Not an SSL error, throw original error
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch with SSL verification enabled (secure)
+   */
+  async _fetchSecure(url, options) {
+    const fetchModule = await import('node-fetch');
+    const fetch = fetchModule.default;
+
+    return fetch(url, {
+      ...options,
+      agent: new https.Agent({
+        rejectUnauthorized: true // SSL verification ON
+      })
+    });
+  }
+
+  /**
+   * Fetch with SSL verification disabled (insecure fallback)
+   */
+  async _fetchInsecure(url, options) {
+    const fetchModule = await import('node-fetch');
+    const fetch = fetchModule.default;
+
+    return fetch(url, {
+      ...options,
+      agent: new https.Agent({
+        rejectUnauthorized: false // SSL verification OFF
+      })
+    });
+  }
+
+  /**
+   * Check if error is SSL-related
+   */
+  _isSSLError(error) {
+    const sslErrorCodes = [
+      'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+      'SELF_SIGNED_CERT_IN_CHAIN',
+      'CERT_HAS_EXPIRED',
+      'UNABLE_TO_GET_ISSUER_CERT',
+      'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+      'CERT_UNTRUSTED',
+      'DEPTH_ZERO_SELF_SIGNED_CERT'
+    ];
+
+    const errorMessage = error.message || '';
+    const errorCode = error.code || '';
+
+    return sslErrorCodes.some(code =>
+      errorMessage.includes(code) || errorCode === code
+    );
+  }
+
+  /**
+   * Get current connection mode
+   */
+  getConnectionMode() {
+    if (!this.hasTestedConnection) {
+      return 'untested';
+    }
+    return this.sslBypassEnabled ? 'corporate-vpn' : 'secure';
+  }
+}
+
+// Export singleton instance
+module.exports = new SecureFetch();

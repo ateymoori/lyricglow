@@ -1,9 +1,9 @@
-const https = require('https');
+const secureFetch = require('../utils/SecureFetch');
 const Logger = require('../utils/Logger');
 
 class TheAudioDBManager {
   constructor(cache) {
-    this.baseUrl = 'www.theaudiodb.com';
+    this.baseUrl = 'https://www.theaudiodb.com';
     this.cache = cache;
     this.apiKey = '523532'; // Free test key
     this.lastRequestTime = 0;
@@ -19,41 +19,28 @@ class TheAudioDBManager {
     }
     this.lastRequestTime = Date.now();
 
-    const options = {
-      hostname: this.baseUrl,
-      path: `/api/v1/json/${this.apiKey}/${endpoint}`,
-      method: 'GET',
-      headers: {
-        'User-Agent': 'MusicDisplay/1.0'
+    try {
+      const url = `${this.baseUrl}/api/v1/json/${this.apiKey}/${endpoint}`;
+
+      // Use smart fetch with SSL fallback
+      const response = await secureFetch.fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'LyricGlow/1.0'
+        }
+      });
+
+      if (!response.ok) {
+        Logger.metadata.error(`TheAudioDB request failed: ${response.status}`);
+        return null;
       }
-    };
 
-    return new Promise((resolve) => {
-      const req = https.request(options, (res) => {
-        let data = '';
-
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          try {
-            const json = JSON.parse(data);
-            resolve(json);
-          } catch (error) {
-            Logger.metadata.error('TheAudioDB JSON parse failed', error);
-            resolve(null);
-          }
-        });
-      });
-
-      req.on('error', (error) => {
-        Logger.metadata.error('TheAudioDB request failed', error);
-        resolve(null);
-      });
-
-      req.end();
-    });
+      const json = await response.json();
+      return json;
+    } catch (error) {
+      Logger.metadata.error('TheAudioDB request failed', error);
+      return null;
+    }
   }
 
   async searchArtist(artistName) {
