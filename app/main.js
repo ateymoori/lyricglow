@@ -427,17 +427,20 @@ app.on('open-url', async (event, url) => {
   }
 });
 
-app.whenReady().then(async () => {
+app.whenReady().then(() => {
   Logger.app.info('App ready, initializing...');
-  await unifiedCache.clearExpired();
+
+  createTray();
+  createWindow();
+
+  unifiedCache.clearExpired().catch(err => {
+    Logger.cache.error('Background cache cleanup failed', err);
+  });
 
   if (spotifyAuth.isLoggedIn()) {
     spotifyAuth.startAutoRefresh();
     Logger.auth.info('Spotify auto-refresh enabled');
   }
-
-  createTray();
-  createWindow();
 });
 
 ipcMain.on('app:quit', () => {

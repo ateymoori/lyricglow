@@ -8,34 +8,39 @@ class UnifiedCacheManager {
     this.cacheRoot = cachePath || path.join(__dirname, '../../.cache');
     this.indexPath = path.join(this.cacheRoot, 'index.json');
     this.cacheExpiry = (config.CACHE_DURATION_HOURS || 168) * 60 * 60 * 1000;
-    this.index = this.loadIndex();
+    this.index = {};
     this.onlineStatus = null;
-    this.ensureCacheDirectories();
+    this.initPromise = this.init();
   }
 
-  ensureCacheDirectories() {
+  async init() {
+    try {
+      await this.ensureCacheDirectoriesAsync();
+      this.index = await this.loadIndexAsync();
+    } catch (error) {
+      Logger.cache.error('Cache initialization failed', error);
+    }
+  }
+
+  async ensureCacheDirectoriesAsync() {
     const dirs = [
       this.cacheRoot,
       path.join(this.cacheRoot, 'images'),
       path.join(this.cacheRoot, 'lyrics'),
       path.join(this.cacheRoot, 'metadata')
     ];
-    dirs.forEach(dir => {
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-    });
+    await Promise.all(
+      dirs.map(dir => fs.promises.mkdir(dir, { recursive: true }).catch(() => {}))
+    );
   }
 
-  loadIndex() {
-    if (fs.existsSync(this.indexPath)) {
-      try {
-        return JSON.parse(fs.readFileSync(this.indexPath, 'utf8'));
-      } catch (error) {
-        return {};
-      }
+  async loadIndexAsync() {
+    try {
+      const data = await fs.promises.readFile(this.indexPath, 'utf8');
+      return JSON.parse(data);
+    } catch (error) {
+      return {};
     }
-    return {};
   }
 
   async saveIndex() {
@@ -94,13 +99,15 @@ class UnifiedCacheManager {
     return age > this.cacheExpiry;
   }
 
-  has(type, key) {
+  async has(type, key) {
+    await this.initPromise;
     if (!this.index[type]) return false;
     const hash = this.generateHash(key);
     return !!this.index[type][hash];
   }
 
   async get(type, key) {
+    await this.initPromise;
     if (!this.index[type]) return null;
 
     const hash = this.generateHash(key);
@@ -139,6 +146,7 @@ class UnifiedCacheManager {
   }
 
   async set(type, key, data) {
+    await this.initPromise;
     if (!data) return false;
 
     try {
@@ -178,6 +186,7 @@ class UnifiedCacheManager {
   }
 
   async clearExpired() {
+    await this.initPromise;
     const isOnline = await this.isOnline();
     if (!isOnline) return;
 
@@ -237,6 +246,7 @@ class UnifiedCacheManager {
   }
 
   async clearAll() {
+    await this.initPromise;
     for (const type of Object.keys(this.index)) {
       for (const hash of Object.keys(this.index[type])) {
         const entry = this.index[type][hash];
@@ -287,6 +297,7 @@ class UnifiedCacheManager {
   }
 
   async deleteOne(type, key) {
+    await this.initPromise;
     const hash = this.generateHash(key);
     if (!this.index[type] || !this.index[type][hash]) {
       return false;
