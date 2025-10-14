@@ -11,6 +11,7 @@ Experience music like never before with word-by-word synchronized lyrics, artist
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-11.0+-lightgrey.svg)](https://www.apple.com/macos)
 [![Electron](https://img.shields.io/badge/Electron-33.1.0-47848F.svg?logo=electron)](https://www.electronjs.org/)
+[![Downloads](https://img.shields.io/github/downloads/ateymoori/lyricglow/total?color=00b8ff)](https://github.com/ateymoori/lyricglow/releases)
 
 ### 📦 Download Free
 
@@ -196,5 +197,11 @@ Free to use, modify, and distribute.
 If you find LyricGlow useful, please star this repository!
 
 [![GitHub stars](https://img.shields.io/github/stars/ateymoori/lyricglow?style=social)](https://github.com/ateymoori/lyricglow)
+
+---
+
+### 🔍 Keywords
+
+synchronized lyrics • real-time lyrics • spotify lyrics • apple music lyrics • youtube music lyrics • karaoke app • lyrics display • macos lyrics • electron music app • music metadata • album artwork • artist biography • rtl lyrics • arabic lyrics • persian lyrics • hebrew lyrics • multilingual lyrics • music player overlay • now playing • desktop lyrics • lyrics widget • floating lyrics • transparent overlay • music companion • lyrics synchronization • lrc format • music visualization • spotify companion • apple music companion • free lyrics app • open source music • lyrics automation • music widget
 
 </div>
