@@ -27,7 +27,7 @@ mac:
         - arm64
         - x64
   artifactName: ${productName}.${ext}
-  hardenedRuntime: false
+  hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
@@ -37,6 +37,7 @@ mac:
 dmg:
   title: ${productName} ${version}
   icon: build/icon.icns
+  background: build/dmg-background.png
   contents:
     - x: 130
       y: 220
@@ -47,3 +48,4 @@ dmg:
   window:
     width: 540
     height: 380
+  writeUpdateInfo: false

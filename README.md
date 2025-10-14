@@ -79,7 +79,10 @@ Experience music like never before with word-by-word synchronized lyrics, artist
 1. [Download LyricGlow.dmg](https://github.com/ateymoori/lyricglow/releases/latest)
 2. Open the DMG file
 3. Drag to Applications folder
-4. Launch and enjoy
+4. **Right-click** LyricGlow → Select **"Open"**
+5. Click **"Open"** in the security dialog
+
+> ⚠️ **First Launch:** macOS will show a security warning because LyricGlow is not notarized. Right-clicking bypasses this (required only once).
 
 **Requirements:**
 - macOS 11.0 or later
