@@ -284,6 +284,7 @@ let internalPosition = 0;
 let internalIsPlaying = false;
 let lastSyncTime = Date.now();
 let internalAnimationRunning = false;
+let isTrackChanging = false;
 
 function startInternalTimer() {
   if (internalAnimationRunning) return;
@@ -344,16 +345,22 @@ function updateDisplay(data) {
     previousTrackKey = null;
     internalIsPlaying = false;
     internalPosition = 0;
+    isTrackChanging = false;
     return;
   }
 
   const currentTrackKey = `${data.title}-${data.artist}`;
-  if (previousTrackKey && previousTrackKey !== currentTrackKey) {
+  const trackChanged = previousTrackKey && previousTrackKey !== currentTrackKey;
+
+  if (trackChanged) {
+    isTrackChanging = true;
     lyricsHandler.clear();
     metadataHandler.clear();
     internalPosition = 0;
+    previousTrackKey = currentTrackKey;
+  } else if (!previousTrackKey) {
+    previousTrackKey = currentTrackKey;
   }
-  previousTrackKey = currentTrackKey;
 
   document.body.classList.remove('no-music');
 
@@ -373,7 +380,14 @@ function updateDisplay(data) {
   }
 
   if (data.duration && data.position !== undefined) {
-    internalPosition = data.position;
+    const positionDiff = Math.abs(data.position - internalPosition);
+    const needsHardSync = trackChanged || positionDiff > 1.0 || internalPosition === 0;
+
+    if (needsHardSync) {
+      internalPosition = data.position;
+      isTrackChanging = false;
+    }
+
     internalIsPlaying = data.isPlaying;
     lastSyncTime = Date.now();
 
@@ -421,16 +435,18 @@ window.musicAPI.onUpdate(updateDisplay);
 
 window.musicAPI.onLyricsUpdate((lyricsData) => {
   if (lyricsData === null) {
-    lyricsHandler.showLoading();
-    setTimeout(() => {
-      if (!lyricsHandler.lyrics.length) {
-        lyricsHandler.showNotAvailable();
-      }
-    }, 2000);
+    if (!isTrackChanging) {
+      lyricsHandler.showLoading();
+      setTimeout(() => {
+        if (!lyricsHandler.lyrics.length) {
+          lyricsHandler.showNotAvailable();
+        }
+      }, 2000);
+    }
   } else {
     lyricsHandler.setLyrics(lyricsData);
-    if (currentMusicData && currentMusicData.position !== undefined) {
-      lyricsHandler.updatePosition(currentMusicData.position);
+    if (!isTrackChanging && currentMusicData && currentMusicData.position !== undefined) {
+      lyricsHandler.updatePosition(internalPosition);
     }
   }
 });

@@ -47,6 +47,7 @@ let mainWindow = null;
 let pollInterval = null;
 let currentTrackKey = null;
 let tray = null;
+let isPolling = false;
 
 // Register custom protocol for OAuth callback (must be before app.whenReady)
 if (process.defaultApp) {
@@ -58,6 +59,12 @@ if (process.defaultApp) {
 }
 
 function pollMusicState() {
+  if (isPolling) {
+    return;
+  }
+
+  isPolling = true;
+
   const script = `set output to "{}"
 
 on escapeJSON(txt)
@@ -170,6 +177,8 @@ return output`;
   fs.writeFileSync(tmpFile, script, 'utf8');
 
   exec(`osascript "${tmpFile}"`, (error, stdout) => {
+    isPolling = false;
+
     try {
       fs.unlinkSync(tmpFile);
     } catch (e) {
@@ -402,7 +411,7 @@ function createWindow() {
   mainWindow.webContents.once('did-finish-load', () => {
     Logger.app.info('Window loaded, starting music detection');
     pollMusicState();
-    pollInterval = setInterval(pollMusicState, 3000);
+    pollInterval = setInterval(pollMusicState, 1000);
   });
 }
 
