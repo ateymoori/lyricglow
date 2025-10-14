@@ -5,8 +5,13 @@ directories:
   output: dist
 files:
   - app/**/*
+  - assets/fonts/**/*
   - .env
-  - node_modules/**/*
+  - node_modules/electron-log/**/*
+  - node_modules/electron-store/**/*
+  - node_modules/node-fetch/**/*
+  - "!node_modules/vazirmatn/**/*"
+  - "!node_modules/@fontsource/**/*"
   - package.json
 extraResources:
   - from: build/iconTemplate.png
