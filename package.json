@@ -1,6 +1,6 @@
 {
   "name": "lyricglow",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Real-time synchronized lyrics and music metadata display for macOS.",
   "main": "app/main.js",
   "scripts": {
