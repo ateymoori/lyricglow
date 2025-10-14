@@ -77,6 +77,12 @@ contextBridge.exposeInMainWorld('musicAPI', {
   setLaunchAtLogin: (enabled) => {
     return ipcRenderer.invoke('settings:set-launch-at-login', enabled);
   },
+  getTrayLyrics: () => {
+    return ipcRenderer.invoke('settings:get-tray-lyrics');
+  },
+  setTrayLyrics: (enabled) => {
+    return ipcRenderer.invoke('settings:set-tray-lyrics', enabled);
+  },
   onOpenSettings: (callback) => {
     ipcRenderer.on('open-settings', () => callback());
   },

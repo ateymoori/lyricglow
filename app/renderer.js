@@ -980,7 +980,8 @@ class SettingsHandler {
     this.initCacheTab();
     this.initLogsTab();
     this.initLaunchAtLogin();
-    
+    this.initTrayLyrics();
+
     window.musicAPI.onOpenSettings(() => {
       this.show();
     });
@@ -1150,9 +1151,28 @@ class SettingsHandler {
       label.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        
+
         checkbox.checked = !checkbox.checked;
         await window.musicAPI.setLaunchAtLogin(checkbox.checked);
+      });
+    }
+  }
+
+  async initTrayLyrics() {
+    const checkbox = document.getElementById('settings-tray-lyrics');
+    if (!checkbox) return;
+
+    const enabled = await window.musicAPI.getTrayLyrics();
+    checkbox.checked = enabled;
+
+    const label = checkbox.closest('.visibility-option');
+    if (label) {
+      label.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        checkbox.checked = !checkbox.checked;
+        await window.musicAPI.setTrayLyrics(checkbox.checked);
       });
     }
   }

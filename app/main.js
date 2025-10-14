@@ -55,6 +55,12 @@ let manualOverride = false;
 let hideTimeout = null;
 let settingsStore = null;
 
+// Tray lyrics display
+let currentLyrics = [];
+let currentLyricIndex = -1;
+let lastTrayUpdate = '';
+let trayLyricsEnabled = true; // Show lyrics in system tray (default: enabled)
+
 // Register custom protocol for OAuth callback (must be before app.whenReady)
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
@@ -70,6 +76,7 @@ async function getSettingsStore() {
     const Store = (await import('electron-store')).default;
     settingsStore = new Store();
     autoHideEnabled = settingsStore.get('autoHideEnabled', false);
+    trayLyricsEnabled = settingsStore.get('trayLyricsEnabled', true);
   }
   return settingsStore;
 }
@@ -82,11 +89,28 @@ function saveAutoHideSetting(enabled) {
   Logger.app.info(`Auto-hide ${enabled ? 'enabled' : 'disabled'}`);
 }
 
+function saveTrayLyricsSetting(enabled) {
+  trayLyricsEnabled = enabled;
+  if (settingsStore) {
+    settingsStore.set('trayLyricsEnabled', enabled);
+  }
+
+  // Clear tray immediately if disabled
+  if (!enabled && tray) {
+    tray.setTitle('');
+    lastTrayUpdate = '';
+  }
+
+  Logger.app.info(`Tray lyrics ${enabled ? 'enabled' : 'disabled'}`);
+}
+
 // Window visibility control
-function showWindow() {
+function showWindow(shouldFocus = false) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
-    mainWindow.focus();
+    if (shouldFocus) {
+      mainWindow.focus();
+    }
   }
 }
 
@@ -105,7 +129,7 @@ function toggleWindow() {
       Logger.app.debug('Window hidden by user (manual override enabled)');
     } else {
       manualOverride = false;
-      showWindow();
+      showWindow(true); // User action: focus the window
       updateTrayMenu();
       Logger.app.debug('Window shown by user (manual override disabled)');
     }
@@ -118,7 +142,7 @@ function handleTrayClick() {
       mainWindow.focus();
     } else {
       manualOverride = false;
-      showWindow();
+      showWindow(true); // User action: focus the window
       updateTrayMenu();
       Logger.app.debug('Window shown via tray click');
     }
@@ -140,12 +164,91 @@ function handleWindowVisibility(isPlaying) {
 
   // Auto-hide mode - show when playing, hide when stopped/paused
   if (isPlaying && !manualOverride) {
-    showWindow();
+    // Only call show() if window is actually hidden to prevent focus stealing
+    if (!mainWindow.isVisible()) {
+      showWindow();
+    }
   } else if (!isPlaying && !manualOverride) {
     hideTimeout = setTimeout(() => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       hideWindow();
     }, 1000);
+  }
+}
+
+// Tray lyrics functions
+function parseLRC(content) {
+  if (!content) return [];
+
+  const lines = content.split('\n');
+  const lyrics = [];
+
+  for (const line of lines) {
+    const match = line.match(/^\[(\d{2}):(\d{2})\.(\d{2})\](.*)$/);
+    if (match) {
+      const [, minutes, seconds, centiseconds, text] = match;
+      const time = parseInt(minutes) * 60 + parseInt(seconds) + parseInt(centiseconds) / 100;
+      lyrics.push({ time, text: text.trim() });
+    }
+  }
+  return lyrics.sort((a, b) => a.time - b.time);
+}
+
+function findCurrentLyricIndex(position) {
+  if (currentLyrics.length === 0 || position < 0) return -1;
+
+  for (let i = currentLyrics.length - 1; i >= 0; i--) {
+    if (position >= currentLyrics[i].time) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+function updateTrayLyrics(position) {
+  if (!tray) return;
+
+  // Check if tray lyrics are disabled
+  if (!trayLyricsEnabled) {
+    if (lastTrayUpdate !== '') {
+      tray.setTitle('');
+      lastTrayUpdate = '';
+    }
+    return;
+  }
+
+  // Check if lyrics are available
+  if (currentLyrics.length === 0) {
+    if (lastTrayUpdate !== '') {
+      tray.setTitle('');
+      lastTrayUpdate = '';
+    }
+    return;
+  }
+
+  // Add 0.5s offset to sync with renderer's interpolated position
+  const adjustedPosition = position + 0.5;
+  const index = findCurrentLyricIndex(adjustedPosition);
+
+  if (index !== currentLyricIndex) {
+    currentLyricIndex = index;
+
+    if (index >= 0 && currentLyrics[index]) {
+      const text = currentLyrics[index].text;
+
+      if (text && text !== '') {
+        // Truncate long lines to prevent menu bar crowding
+        const maxLength = 60;
+        const displayText = text.length > maxLength
+          ? text.substring(0, maxLength - 3) + '...'
+          : text;
+
+        if (displayText !== lastTrayUpdate) {
+          tray.setTitle(displayText);
+          lastTrayUpdate = displayText;
+        }
+      }
+    }
   }
 }
 
@@ -317,15 +420,35 @@ async function broadcastMusicUpdate(trackData) {
 
         const mergedMetadata = mergeArtistMetadata(audioDBMetadata, spotifyMetadata);
 
+        // Update tray lyrics
+        if (lyricsData && lyricsData.synced) {
+          currentLyrics = parseLRC(lyricsData.synced);
+          currentLyricIndex = -1;
+        } else {
+          currentLyrics = [];
+          currentLyricIndex = -1;
+          if (tray) tray.setTitle('');
+          lastTrayUpdate = '';
+        }
+
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('lyrics:update', lyricsData);
           mainWindow.webContents.send('metadata:update', mergedMetadata);
         }
       }
 
+      // Update tray with current position
+      if (trackData.position !== undefined) {
+        updateTrayLyrics(trackData.position);
+      }
+
       handleWindowVisibility(trackData.isPlaying);
     } else if (currentTrackKey) {
       currentTrackKey = null;
+      currentLyrics = [];
+      currentLyricIndex = -1;
+      if (tray) tray.setTitle('');
+      lastTrayUpdate = '';
       mainWindow.webContents.send('lyrics:update', null);
       mainWindow.webContents.send('metadata:update', null);
       handleWindowVisibility(false);
@@ -428,7 +551,7 @@ function updateTrayMenu() {
           click: () => {
             saveAutoHideSetting(false);
             manualOverride = false;
-            showWindow();
+            showWindow(false); // Don't steal focus from user's current app
             updateTrayMenu();
           }
         },
@@ -449,7 +572,7 @@ function updateTrayMenu() {
       label: 'Settings',
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
-          showWindow();
+          showWindow(true); // User action: show and focus
           mainWindow.webContents.send('open-settings');
         }
       }
@@ -837,6 +960,15 @@ ipcMain.handle('settings:set-launch-at-login', (_event, enabled) => {
     openAtLogin: enabled,
     openAsHidden: false
   });
+  return true;
+});
+
+ipcMain.handle('settings:get-tray-lyrics', () => {
+  return trayLyricsEnabled;
+});
+
+ipcMain.handle('settings:set-tray-lyrics', (_event, enabled) => {
+  saveTrayLyricsSetting(enabled);
   return true;
 });
 
