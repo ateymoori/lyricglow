@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, globalShortcut } = require('electron');
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -49,6 +49,12 @@ let currentTrackKey = null;
 let tray = null;
 let isPolling = false;
 
+// Window behavior management
+let autoHideEnabled = false; // false = always show (default), true = show only when playing
+let manualOverride = false;
+let hideTimeout = null;
+let settingsStore = null;
+
 // Register custom protocol for OAuth callback (must be before app.whenReady)
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
@@ -56,6 +62,91 @@ if (process.defaultApp) {
   }
 } else {
   app.setAsDefaultProtocolClient('musicdisplay');
+}
+
+// Settings store management
+async function getSettingsStore() {
+  if (!settingsStore) {
+    const Store = (await import('electron-store')).default;
+    settingsStore = new Store();
+    autoHideEnabled = settingsStore.get('autoHideEnabled', false);
+  }
+  return settingsStore;
+}
+
+function saveAutoHideSetting(enabled) {
+  autoHideEnabled = enabled;
+  if (settingsStore) {
+    settingsStore.set('autoHideEnabled', enabled);
+  }
+  Logger.app.info(`Auto-hide ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+// Window visibility control
+function showWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
+function hideWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide();
+  }
+}
+
+function toggleWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isVisible()) {
+      manualOverride = true;
+      hideWindow();
+      updateTrayMenu();
+      Logger.app.debug('Window hidden by user (manual override enabled)');
+    } else {
+      manualOverride = false;
+      showWindow();
+      updateTrayMenu();
+      Logger.app.debug('Window shown by user (manual override disabled)');
+    }
+  }
+}
+
+function handleTrayClick() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isVisible()) {
+      mainWindow.focus();
+    } else {
+      manualOverride = false;
+      showWindow();
+      updateTrayMenu();
+      Logger.app.debug('Window shown via tray click');
+    }
+  }
+}
+
+function handleWindowVisibility(isPlaying) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  clearTimeout(hideTimeout);
+
+  if (!autoHideEnabled) {
+    // Always show mode - keep window visible
+    if (!mainWindow.isVisible() && !manualOverride) {
+      showWindow();
+    }
+    return;
+  }
+
+  // Auto-hide mode - show when playing, hide when stopped/paused
+  if (isPlaying && !manualOverride) {
+    showWindow();
+  } else if (!isPlaying && !manualOverride) {
+    hideTimeout = setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      hideWindow();
+    }, 1000);
+  }
 }
 
 function pollMusicState() {
@@ -215,6 +306,7 @@ async function broadcastMusicUpdate(trackData) {
 
       if (!currentTrackKey || currentTrackKey !== trackKey) {
         currentTrackKey = trackKey;
+        manualOverride = false; // Reset on new track
         Logger.music.info(`Now playing: ${trackData.artist} - ${trackData.title}`);
 
         const [lyricsData, audioDBMetadata, spotifyMetadata] = await Promise.all([
@@ -230,10 +322,13 @@ async function broadcastMusicUpdate(trackData) {
           mainWindow.webContents.send('metadata:update', mergedMetadata);
         }
       }
+
+      handleWindowVisibility(trackData.isPlaying);
     } else if (currentTrackKey) {
       currentTrackKey = null;
       mainWindow.webContents.send('lyrics:update', null);
       mainWindow.webContents.send('metadata:update', null);
+      handleWindowVisibility(false);
     }
   }
 }
@@ -306,25 +401,11 @@ function mergeArtistMetadata(audioDBData, spotifyData) {
   };
 }
 
-function createTray() {
-  try {
-    const iconName = process.platform === 'darwin' ? 'iconTemplate.png' : 'icon.png';
-    
-    // In production (packaged app), icons are in Resources folder
-    // In development, icons are in build folder
-    const iconPath = app.isPackaged
-      ? path.join(process.resourcesPath, iconName)
-      : path.join(__dirname, '../build', iconName);
-    
-    tray = new Tray(iconPath);
-    tray.setToolTip('LyricGlow');
-    Logger.app.info('System tray created successfully');
-  } catch (error) {
-    Logger.app.error('Tray creation failed:', error.message);
-    Logger.app.debug('Attempted icon path:', iconPath);
-    return;
-  }
-  
+function updateTrayMenu() {
+  if (!tray) return;
+
+  const isVisible = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
+
   const contextMenu = Menu.buildFromTemplate([
     {
       label: 'LyricGlow',
@@ -332,11 +413,43 @@ function createTray() {
     },
     { type: 'separator' },
     {
+      label: isVisible ? 'Hide Window' : 'Show Window',
+      accelerator: 'CommandOrControl+L',
+      click: () => toggleWindow()
+    },
+    { type: 'separator' },
+    {
+      label: 'Window Behavior',
+      submenu: [
+        {
+          label: 'Always Show',
+          type: 'radio',
+          checked: !autoHideEnabled,
+          click: () => {
+            saveAutoHideSetting(false);
+            manualOverride = false;
+            showWindow();
+            updateTrayMenu();
+          }
+        },
+        {
+          label: 'Show Only When Playing',
+          type: 'radio',
+          checked: autoHideEnabled,
+          click: () => {
+            saveAutoHideSetting(true);
+            manualOverride = false;
+            updateTrayMenu();
+          }
+        }
+      ]
+    },
+    { type: 'separator' },
+    {
       label: 'Settings',
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.show();
-          mainWindow.focus();
+          showWindow();
           mainWindow.webContents.send('open-settings');
         }
       }
@@ -350,15 +463,32 @@ function createTray() {
       }
     }
   ]);
-  
+
   tray.setContextMenu(contextMenu);
-  
-  tray.on('click', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
+}
+
+function createTray() {
+  try {
+    const iconName = process.platform === 'darwin' ? 'iconTemplate.png' : 'icon.png';
+
+    // In production (packaged app), icons are in Resources folder
+    // In development, icons are in build folder
+    const iconPath = app.isPackaged
+      ? path.join(process.resourcesPath, iconName)
+      : path.join(__dirname, '../build', iconName);
+
+    tray = new Tray(iconPath);
+    tray.setToolTip('LyricGlow');
+    Logger.app.info('System tray created successfully');
+  } catch (error) {
+    Logger.app.error('Tray creation failed:', error.message);
+    Logger.app.debug('Attempted icon path:', iconPath);
+    return;
+  }
+
+  updateTrayMenu();
+
+  tray.on('click', () => handleTrayClick());
 }
 
 function createWindow() {
@@ -402,7 +532,9 @@ function createWindow() {
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
-      mainWindow.hide();
+      manualOverride = true;
+      hideWindow();
+      updateTrayMenu();
     }
   });
 
@@ -436,8 +568,24 @@ app.on('open-url', async (event, url) => {
   }
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Logger.app.info('App ready, initializing...');
+
+  // Initialize settings store and load auto-hide setting
+  await getSettingsStore();
+  Logger.app.info(`Auto-hide mode: ${autoHideEnabled ? 'enabled' : 'disabled'}`);
+
+  // Register global hotkey
+  const hotkeyRegistered = globalShortcut.register('CommandOrControl+L', () => {
+    toggleWindow();
+    updateTrayMenu();
+  });
+
+  if (hotkeyRegistered) {
+    Logger.app.info('Global hotkey registered: Cmd/Ctrl+L');
+  } else {
+    Logger.app.warn('Failed to register global hotkey');
+  }
 
   createTray();
   createWindow();
@@ -708,6 +856,8 @@ ipcMain.handle('logs:clear', async () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  globalShortcut.unregisterAll();
+  clearTimeout(hideTimeout);
   if (pollInterval) {
     clearInterval(pollInterval);
   }
