@@ -1,4 +1,4 @@
-const https = require('https');
+const secureFetch = require('../utils/SecureFetch');
 const Logger = require('../utils/Logger');
 
 class ImageCacheManager {
@@ -25,27 +25,21 @@ class ImageCacheManager {
   }
 
   async downloadImage(url) {
-    return new Promise((resolve) => {
-      https.get(url, (response) => {
-        if (response.statusCode !== 200) {
-          Logger.cache.debug(`Image download failed (${response.statusCode})`);
-          resolve(null);
-          return;
-        }
+    try {
+      const response = await secureFetch.fetch(url);
 
-        const chunks = [];
-        response.on('data', (chunk) => chunks.push(chunk));
+      if (!response.ok) {
+        Logger.cache.debug(`Image download failed (${response.status})`);
+        return null;
+      }
 
-        response.on('end', () => {
-          const buffer = Buffer.concat(chunks);
-          const base64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
-          resolve(base64);
-        });
-      }).on('error', (error) => {
-        Logger.cache.error('Image download error', error);
-        resolve(null);
-      });
-    });
+      const buffer = await response.buffer();
+      const base64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+      return base64;
+    } catch (error) {
+      Logger.cache.error('Image download error', error);
+      return null;
+    }
   }
 }
 

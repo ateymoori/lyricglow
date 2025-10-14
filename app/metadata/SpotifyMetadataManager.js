@@ -103,16 +103,23 @@ class SpotifyMetadataManager {
 
     const cacheKey = `spotify_artist:${artistId}`;
     const cached = await this.cache.get('metadata', cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      Logger.metadata.debug(`Spotify cache hit: artist ${artistId}`);
+      return cached;
+    }
 
+    const startTime = Date.now();
     const response = await this.makeRequest(`/v1/artists/${artistId}`);
+    const duration = Date.now() - startTime;
 
     if (response) {
       const artistData = this.parseArtistData(response);
+      Logger.metadata.info(`Spotify found (${duration}ms): ${artistData.name}`);
       this.cache.set('metadata', cacheKey, artistData);
       return artistData;
     }
 
+    Logger.metadata.warn(`Spotify not found (${duration}ms): artist ${artistId}`);
     return await this.cache.get('metadata', cacheKey);
   }
 

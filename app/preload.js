@@ -79,5 +79,14 @@ contextBridge.exposeInMainWorld('musicAPI', {
   },
   onOpenSettings: (callback) => {
     ipcRenderer.on('open-settings', () => callback());
+  },
+  logsGetStats: () => {
+    return ipcRenderer.invoke('logs:get-stats');
+  },
+  logsOpenFolder: () => {
+    return ipcRenderer.invoke('logs:open-folder');
+  },
+  logsClear: () => {
+    return ipcRenderer.invoke('logs:clear');
   }
 });

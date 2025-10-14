@@ -23,7 +23,7 @@ class SecureFetch {
       const response = await this._fetchSecure(url, options);
 
       if (!this.hasTestedConnection) {
-        Logger.app.info('✅ Secure connection successful (SSL verification enabled)');
+        Logger.app.info('Secure connection successful (SSL verification enabled)');
         this.hasTestedConnection = true;
       }
 
@@ -31,20 +31,20 @@ class SecureFetch {
     } catch (error) {
       // Check if it's an SSL error
       if (this._isSSLError(error)) {
-        Logger.app.warn('⚠️  SSL verification failed, retrying with bypass (corporate VPN detected)');
+        Logger.app.warn('SSL verification failed, retrying with bypass (corporate VPN detected)');
 
         // Second attempt: Insecure (SSL verification OFF)
         try {
           const response = await this._fetchInsecure(url, options);
 
           if (!this.sslBypassEnabled) {
-            Logger.app.info('✅ Connection successful with SSL bypass (corporate VPN mode)');
+            Logger.app.info('Connection successful with SSL bypass (corporate VPN mode)');
             this.sslBypassEnabled = true;
           }
 
           return response;
         } catch (fallbackError) {
-          Logger.app.error('❌ Both secure and insecure connection attempts failed', fallbackError);
+          Logger.app.error('Both secure and insecure connection attempts failed', fallbackError);
           throw fallbackError;
         }
       }

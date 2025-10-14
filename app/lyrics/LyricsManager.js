@@ -1,4 +1,5 @@
 const secureFetch = require('../utils/SecureFetch');
+const Logger = require('../utils/Logger');
 
 class LyricsManager {
   constructor(cache) {
@@ -7,18 +8,27 @@ class LyricsManager {
 
   async fetchLyrics(title, artist) {
     const cacheKey = `${title}-${artist}`.toLowerCase();
+    const startTime = Date.now();
 
     const cached = await this.cache.get('lyrics', cacheKey);
     if (cached) {
+      Logger.lyrics.debug(`Cache hit: ${title} - ${artist}`);
       return cached;
     }
 
+    Logger.lyrics.debug(`Fetching: ${title} - ${artist}`);
+
     const fetched = await this.fetchFromAPI(title, artist);
+    const duration = Date.now() - startTime;
+
     if (fetched) {
+      const hasSync = fetched.synced ? 'yes' : 'no';
+      Logger.lyrics.info(`Found (${duration}ms, synced: ${hasSync}): ${title} - ${artist}`);
       this.cache.set('lyrics', cacheKey, fetched);
       return fetched;
     }
 
+    Logger.lyrics.warn(`Not found (${duration}ms): ${title} - ${artist}`);
     const offlineCache = await this.cache.get('lyrics', cacheKey);
     return offlineCache;
   }
@@ -28,7 +38,6 @@ class LyricsManager {
       const query = encodeURIComponent(`${title} ${artist}`);
       const url = `https://lrclib.net/api/search?q=${query}`;
 
-      // Use smart fetch with SSL fallback
       const response = await secureFetch.fetch(url, {
         method: 'GET',
         headers: {
@@ -37,6 +46,7 @@ class LyricsManager {
       });
 
       if (!response.ok) {
+        Logger.lyrics.error(`API error: HTTP ${response.status}`);
         return null;
       }
 
@@ -58,6 +68,7 @@ class LyricsManager {
 
       return null;
     } catch (error) {
+      Logger.lyrics.error('Fetch failed', error);
       return null;
     }
   }

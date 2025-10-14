@@ -1,138 +1,154 @@
-/**
- * Centralized logging utility for clean, consistent console output
- *
- * Features:
- * - Structured format: [HH:MM:SS] [CATEGORY] message
- * - Log levels: ERROR, WARN, INFO, DEBUG
- * - Environment-aware: INFO in production, DEBUG in development
- * - Categories: APP, MUSIC, LYRICS, METADATA, CACHE, AUTH
- */
+const log = require('electron-log');
+const path = require('path');
+const { app } = require('electron');
 
 class Logger {
-  static LEVELS = {
-    ERROR: 0,
-    WARN: 1,
-    INFO: 2,
-    DEBUG: 3
-  };
+  static isConfigured = false;
 
-  static CATEGORIES = {
-    APP: 'APP',
-    MUSIC: 'MUSIC',
-    LYRICS: 'LYRICS',
-    METADATA: 'METADATA',
-    CACHE: 'CACHE',
-    AUTH: 'AUTH'
-  };
+  static configure() {
+    if (this.isConfigured) return;
 
-  static currentLevel = Logger.LEVELS.DEBUG;
+    log.transports.file.level = 'debug';
+    log.transports.console.level = 'debug';
 
-  /**
-   * Format timestamp as HH:MM:SS
-   */
-  static getTimestamp() {
-    const now = new Date();
-    return now.toTimeString().split(' ')[0];
+    log.transports.file.maxSize = 5 * 1024 * 1024;
+    log.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}] [{level}] [{scope}] {text}';
+    log.transports.console.format = '[{h}:{i}:{s}] [{scope}] {text}';
+
+    const logsPath = path.join(app.getPath('logs'), 'main.log');
+    log.transports.file.resolvePathFn = () => logsPath;
+
+    this.isConfigured = true;
   }
 
-  /**
-   * Internal log method
-   */
-  static _log(level, category, message, data = null) {
-    if (level > Logger.currentLevel) return;
-
-    const timestamp = Logger.getTimestamp();
-    const prefix = `[${timestamp}] [${category}]`;
-
+  static formatMessage(category, message, data) {
     if (data !== null && data !== undefined) {
-      console.log(prefix, message, data);
-    } else {
-      console.log(prefix, message);
+      if (data instanceof Error) {
+        return `${message}: ${data.message}`;
+      }
+      if (typeof data === 'object') {
+        return `${message} ${JSON.stringify(data)}`;
+      }
+      return `${message} ${data}`;
     }
+    return message;
   }
 
-  /**
-   * Log error (always shown)
-   */
   static error(category, message, error = null) {
-    const timestamp = Logger.getTimestamp();
-    const prefix = `[${timestamp}] [${category}] ERROR:`;
-
-    if (error) {
-      console.error(prefix, message, error);
-    } else {
-      console.error(prefix, message);
-    }
+    const scope = log.scope(category);
+    const msg = this.formatMessage(category, message, error);
+    scope.error(msg);
   }
 
-  /**
-   * Log warning
-   */
   static warn(category, message, data = null) {
-    if (Logger.LEVELS.WARN > Logger.currentLevel) return;
-
-    const timestamp = Logger.getTimestamp();
-    const prefix = `[${timestamp}] [${category}] WARN:`;
-
-    if (data !== null && data !== undefined) {
-      console.warn(prefix, message, data);
-    } else {
-      console.warn(prefix, message);
-    }
+    const scope = log.scope(category);
+    const msg = this.formatMessage(category, message, data);
+    scope.warn(msg);
   }
 
-  /**
-   * Log info (important state changes)
-   */
   static info(category, message, data = null) {
-    Logger._log(Logger.LEVELS.INFO, category, message, data);
+    const scope = log.scope(category);
+    const msg = this.formatMessage(category, message, data);
+    scope.info(msg);
   }
 
-  /**
-   * Log debug (verbose, dev only)
-   */
   static debug(category, message, data = null) {
-    Logger._log(Logger.LEVELS.DEBUG, category, message, data);
+    const scope = log.scope(category);
+    const msg = this.formatMessage(category, message, data);
+    scope.debug(msg);
   }
 
-  /**
-   * Convenience methods for common categories
-   */
   static app = {
-    info: (msg, data) => Logger.info(Logger.CATEGORIES.APP, msg, data),
-    debug: (msg, data) => Logger.debug(Logger.CATEGORIES.APP, msg, data),
-    error: (msg, err) => Logger.error(Logger.CATEGORIES.APP, msg, err)
+    info: (msg, data) => Logger.info('APP', msg, data),
+    debug: (msg, data) => Logger.debug('APP', msg, data),
+    error: (msg, err) => Logger.error('APP', msg, err),
+    warn: (msg, data) => Logger.warn('APP', msg, data)
   };
 
   static music = {
-    info: (msg, data) => Logger.info(Logger.CATEGORIES.MUSIC, msg, data),
-    debug: (msg, data) => Logger.debug(Logger.CATEGORIES.MUSIC, msg, data),
-    error: (msg, err) => Logger.error(Logger.CATEGORIES.MUSIC, msg, err)
+    info: (msg, data) => Logger.info('MUSIC', msg, data),
+    debug: (msg, data) => Logger.debug('MUSIC', msg, data),
+    error: (msg, err) => Logger.error('MUSIC', msg, err),
+    warn: (msg, data) => Logger.warn('MUSIC', msg, data)
   };
 
   static lyrics = {
-    info: (msg, data) => Logger.info(Logger.CATEGORIES.LYRICS, msg, data),
-    debug: (msg, data) => Logger.debug(Logger.CATEGORIES.LYRICS, msg, data),
-    error: (msg, err) => Logger.error(Logger.CATEGORIES.LYRICS, msg, err)
+    info: (msg, data) => Logger.info('LYRICS', msg, data),
+    debug: (msg, data) => Logger.debug('LYRICS', msg, data),
+    error: (msg, err) => Logger.error('LYRICS', msg, err),
+    warn: (msg, data) => Logger.warn('LYRICS', msg, data)
   };
 
   static metadata = {
-    info: (msg, data) => Logger.info(Logger.CATEGORIES.METADATA, msg, data),
-    debug: (msg, data) => Logger.debug(Logger.CATEGORIES.METADATA, msg, data),
-    error: (msg, err) => Logger.error(Logger.CATEGORIES.METADATA, msg, err)
+    info: (msg, data) => Logger.info('METADATA', msg, data),
+    debug: (msg, data) => Logger.debug('METADATA', msg, data),
+    error: (msg, err) => Logger.error('METADATA', msg, err),
+    warn: (msg, data) => Logger.warn('METADATA', msg, data)
   };
 
   static cache = {
-    info: (msg, data) => Logger.info(Logger.CATEGORIES.CACHE, msg, data),
-    debug: (msg, data) => Logger.debug(Logger.CATEGORIES.CACHE, msg, data),
-    error: (msg, err) => Logger.error(Logger.CATEGORIES.CACHE, msg, err)
+    info: (msg, data) => Logger.info('CACHE', msg, data),
+    debug: (msg, data) => Logger.debug('CACHE', msg, data),
+    error: (msg, err) => Logger.error('CACHE', msg, err),
+    warn: (msg, data) => Logger.warn('CACHE', msg, data)
   };
 
   static auth = {
-    info: (msg, data) => Logger.info(Logger.CATEGORIES.AUTH, msg, data),
-    debug: (msg, data) => Logger.debug(Logger.CATEGORIES.AUTH, msg, data),
-    error: (msg, err) => Logger.error(Logger.CATEGORIES.AUTH, msg, err)
+    info: (msg, data) => Logger.info('AUTH', msg, data),
+    debug: (msg, data) => Logger.debug('AUTH', msg, data),
+    error: (msg, err) => Logger.error('AUTH', msg, err),
+    warn: (msg, data) => Logger.warn('AUTH', msg, data)
   };
+
+  static getLogPath() {
+    return path.join(app.getPath('logs'), 'main.log');
+  }
+
+  static async clearLogs() {
+    const fs = require('fs').promises;
+    const logsDir = app.getPath('logs');
+
+    try {
+      const files = await fs.readdir(logsDir);
+      const logFiles = files.filter(f => f.endsWith('.log'));
+
+      for (const file of logFiles) {
+        await fs.unlink(path.join(logsDir, file));
+      }
+
+      Logger.app.info('Logs cleared successfully');
+      return true;
+    } catch (error) {
+      Logger.app.error('Failed to clear logs', error);
+      return false;
+    }
+  }
+
+  static async getLogStats() {
+    const fs = require('fs').promises;
+    const logsDir = app.getPath('logs');
+
+    try {
+      const files = await fs.readdir(logsDir);
+      const logFiles = files.filter(f => f.endsWith('.log'));
+
+      let totalSize = 0;
+      for (const file of logFiles) {
+        const stats = await fs.stat(path.join(logsDir, file));
+        totalSize += stats.size;
+      }
+
+      return {
+        count: logFiles.length,
+        size: totalSize,
+        path: logsDir
+      };
+    } catch (error) {
+      return { count: 0, size: 0, path: logsDir };
+    }
+  }
 }
+
+Logger.configure();
 
 module.exports = Logger;

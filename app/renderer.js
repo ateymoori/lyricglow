@@ -26,13 +26,11 @@ function initProgressBarSeek() {
 
   if (!progressBarContainer) return;
 
-  // Click to seek
   progressBarContainer.addEventListener('click', (e) => {
     if (!currentMusicData || !currentMusicData.duration) return;
     seekToPosition(e);
   });
 
-  // Drag to seek
   progressBarContainer.addEventListener('mousedown', (e) => {
     if (!currentMusicData || !currentMusicData.duration) return;
     isDragging = true;
@@ -57,11 +55,9 @@ function seekToPosition(e) {
   const percentage = Math.max(0, Math.min(1, clickX / rect.width));
   const newPosition = percentage * currentMusicData.duration;
 
-  // Update UI immediately for responsiveness
   elements.progressBar.style.width = `${percentage * 100}%`;
   elements.currentTime.textContent = formatTime(newPosition);
 
-  // Send seek command to Spotify
   window.musicAPI.seek(newPosition);
 }
 
@@ -476,7 +472,6 @@ class MetadataHandler {
     if (metadata.artist) {
       let hasInfo = false;
 
-      // Alternate name (e.g., real name)
       if (metadata.artist.alternateName && metadata.artist.alternateName.trim() !== '') {
         this.elements.artistAlternateName.removeAttribute('data-label');
         this.elements.artistAlternateName.textContent = metadata.artist.alternateName;
@@ -486,7 +481,6 @@ class MetadataHandler {
         this.elements.artistAlternateName.style.display = 'none';
       }
 
-      // Country
       if (metadata.artist.country) {
         this.elements.artistCountry.setAttribute('data-label', '📍');
         this.elements.artistCountry.textContent = metadata.artist.country;
@@ -496,7 +490,6 @@ class MetadataHandler {
         this.elements.artistCountry.style.display = 'none';
       }
 
-      // Born/Formed year
       if (metadata.artist.bornYear || metadata.artist.formedYear) {
         const year = metadata.artist.bornYear || metadata.artist.formedYear;
         this.elements.artistBornYear.setAttribute('data-label', '🎂');
@@ -507,7 +500,6 @@ class MetadataHandler {
         this.elements.artistBornYear.style.display = 'none';
       }
 
-      // Died year
       if (metadata.artist.diedYear) {
         this.elements.artistDiedYear.setAttribute('data-label', '†');
         this.elements.artistDiedYear.textContent = metadata.artist.diedYear;
@@ -517,7 +509,6 @@ class MetadataHandler {
         this.elements.artistDiedYear.style.display = 'none';
       }
 
-      // Genre
       if (metadata.artist.genre) {
         this.elements.artistGenre.setAttribute('data-label', '🎵');
         this.elements.artistGenre.textContent = metadata.artist.genre;
@@ -708,10 +699,8 @@ class MetadataHandler {
       img.alt = 'Artist image';
       img.src = cached;
 
-      // Add error handler to hide broken images
       img.onerror = () => {
         img.style.display = 'none';
-        console.warn('Failed to load cached image');
       };
 
       img.onclick = () => this.openModal(cached);
@@ -920,13 +909,13 @@ class SettingsHandler {
 
     this.initTabs();
     this.initCacheTab();
+    this.initLogsTab();
     this.initLaunchAtLogin();
     
     window.musicAPI.onOpenSettings(() => {
       this.show();
     });
 
-    // Settings button click
     this.settingsBtn.addEventListener('click', async () => {
       await this.updateLoginStatus();
       if (this.currentTab === 'storage') {
@@ -935,39 +924,32 @@ class SettingsHandler {
       this.show();
     });
 
-    // Close button click
     this.closeBtn.addEventListener('click', () => {
       this.hide();
     });
 
-    // Click outside to close
     this.modal.addEventListener('click', (e) => {
       if (e.target === this.modal) {
         this.hide();
       }
     });
 
-    // Login button
     this.loginBtn.addEventListener('click', () => {
       window.musicAPI.spotifyLogin();
     });
 
-    // Logout button
     this.logoutBtn.addEventListener('click', () => {
       window.musicAPI.spotifyLogout();
     });
 
-    // Listen for login success
     window.musicAPI.onSpotifyLoggedIn(() => {
       this.updateLoginStatus();
     });
 
-    // Listen for logout
     window.musicAPI.onSpotifyLoggedOut(() => {
       this.updateLoginStatus();
     });
 
-    // Listen for login errors
     window.musicAPI.onSpotifyLoginError((error) => {
       console.error('Spotify login error:', error);
       alert(`Login failed: ${error}`);
@@ -978,11 +960,9 @@ class SettingsHandler {
     const isLoggedIn = await window.musicAPI.spotifyIsLoggedIn();
 
     if (isLoggedIn) {
-      // Fetch user profile
       const profile = await window.musicAPI.spotifyGetUserProfile();
 
       if (profile) {
-        // Update user avatar
         if (profile.imageUrl) {
           this.userAvatar.src = profile.imageUrl;
           this.userAvatar.style.display = 'block';
@@ -990,10 +970,8 @@ class SettingsHandler {
           this.userAvatar.style.display = 'none';
         }
 
-        // Update user name
         this.userName.textContent = profile.displayName || 'Spotify User';
 
-        // Update user email
         if (profile.email) {
           this.userEmail.textContent = profile.email;
           this.userEmail.style.display = 'block';
@@ -1042,6 +1020,10 @@ class SettingsHandler {
     if (tabName === 'storage') {
       this.loadCacheList();
     }
+
+    if (tabName === 'logs') {
+      this.loadLogsStats();
+    }
   }
 
   initCacheTab() {
@@ -1052,6 +1034,39 @@ class SettingsHandler {
         await this.loadCacheList();
       }
     });
+  }
+
+  initLogsTab() {
+    const openFolderBtn = document.getElementById('logsOpenFolderBtn');
+    const clearBtn = document.getElementById('logsClearBtn');
+
+    openFolderBtn.addEventListener('click', async () => {
+      await window.musicAPI.logsOpenFolder();
+    });
+
+    clearBtn.addEventListener('click', async () => {
+      if (confirm('Are you sure you want to clear all logs? This cannot be undone.')) {
+        const success = await window.musicAPI.logsClear();
+        if (success) {
+          await this.loadLogsStats();
+        }
+      }
+    });
+  }
+
+  async loadLogsStats() {
+    const statsEl = document.getElementById('logsStatsText');
+    const pathEl = document.getElementById('logsPath');
+
+    try {
+      const stats = await window.musicAPI.logsGetStats();
+      const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+      statsEl.textContent = `${stats.count} log files • ${sizeMB} MB`;
+      pathEl.textContent = stats.path;
+    } catch (error) {
+      statsEl.textContent = 'Unable to load log stats';
+      pathEl.textContent = '~/Library/Logs/LyricGlow';
+    }
   }
 
   async initLaunchAtLogin() {

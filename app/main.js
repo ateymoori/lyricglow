@@ -678,6 +678,20 @@ ipcMain.handle('settings:set-launch-at-login', (_event, enabled) => {
   return true;
 });
 
+ipcMain.handle('logs:get-stats', async () => {
+  return await Logger.getLogStats();
+});
+
+ipcMain.handle('logs:open-folder', () => {
+  const logsPath = Logger.getLogPath();
+  shell.showItemInFolder(logsPath);
+  return true;
+});
+
+ipcMain.handle('logs:clear', async () => {
+  return await Logger.clearLogs();
+});
+
 app.on('before-quit', () => {
   app.isQuitting = true;
   if (pollInterval) {

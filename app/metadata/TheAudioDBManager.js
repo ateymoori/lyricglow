@@ -5,13 +5,12 @@ class TheAudioDBManager {
   constructor(cache) {
     this.baseUrl = 'https://www.theaudiodb.com';
     this.cache = cache;
-    this.apiKey = '523532'; // Free test key
+    this.apiKey = '523532';
     this.lastRequestTime = 0;
-    this.minRequestInterval = 500; // 2 calls per second = 500ms between calls
+    this.minRequestInterval = 500;
   }
 
   async makeRequest(endpoint) {
-    // Rate limiting
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
     if (timeSinceLastRequest < this.minRequestInterval) {
@@ -22,7 +21,6 @@ class TheAudioDBManager {
     try {
       const url = `${this.baseUrl}/api/v1/json/${this.apiKey}/${endpoint}`;
 
-      // Use smart fetch with SSL fallback
       const response = await secureFetch.fetch(url, {
         method: 'GET',
         headers: {
@@ -31,7 +29,7 @@ class TheAudioDBManager {
       });
 
       if (!response.ok) {
-        Logger.metadata.error(`TheAudioDB request failed: ${response.status}`);
+        Logger.metadata.error(`TheAudioDB error: HTTP ${response.status}`);
         return null;
       }
 
@@ -46,34 +44,33 @@ class TheAudioDBManager {
   async searchArtist(artistName) {
     if (!artistName) return null;
 
-    // Check cache first (1 year cache for artist data)
     const cacheKey = `audiodb_artist:${artistName.toLowerCase()}`;
     const cached = await this.cache.get('metadata', cacheKey);
     if (cached) {
-      Logger.metadata.debug('TheAudioDB: Cache hit');
+      Logger.metadata.debug(`TheAudioDB cache hit: ${artistName}`);
       return cached;
     }
 
-    // Search by artist name
+    const startTime = Date.now();
     const encodedArtist = encodeURIComponent(artistName);
     const response = await this.makeRequest(`search.php?s=${encodedArtist}`);
+    const duration = Date.now() - startTime;
 
     if (response && response.artists && response.artists.length > 0) {
-      const artist = response.artists[0]; // Take first result
+      const artist = response.artists[0];
       const parsedData = this.parseArtistData(artist);
 
-      // Cache for 1 year (artist data rarely changes)
+      Logger.metadata.info(`TheAudioDB found (${duration}ms): ${artistName}`);
       await this.cache.set('metadata', cacheKey, parsedData);
       return parsedData;
     }
 
-    // If not found, try offline cache
+    Logger.metadata.warn(`TheAudioDB not found (${duration}ms): ${artistName}`);
     const offlineCache = await this.cache.get('metadata', cacheKey);
     return offlineCache;
   }
 
   parseArtistData(artist) {
-    // Extract all fanart images (different photos, not just sizes)
     const fanartImages = [
       artist.strArtistThumb,
       artist.strArtistFanart,
@@ -82,7 +79,7 @@ class TheAudioDBManager {
       artist.strArtistFanart4,
       artist.strArtistWideThumb,
       artist.strArtistBanner
-    ].filter(img => img && img !== ''); // Remove null/empty
+    ].filter(img => img && img !== '');
 
     return {
       name: artist.strArtist,
@@ -98,8 +95,6 @@ class TheAudioDBManager {
       mood: artist.strMood,
       gender: artist.strGender,
       members: artist.intMembers,
-
-      // Biography in multiple languages
       bio: {
         summary: this.truncateBio(artist.strBiographyEN, 300),
         content: artist.strBiographyEN,
@@ -111,20 +106,14 @@ class TheAudioDBManager {
         jp: artist.strBiographyJP,
         ru: artist.strBiographyRU
       },
-
-      // Social media
       website: artist.strWebsite,
       facebook: artist.strFacebook,
       twitter: artist.strTwitter,
-
-      // Images - multiple different photos
       allImages: fanartImages,
       thumb: artist.strArtistThumb,
       logo: artist.strArtistLogo,
       clearart: artist.strArtistClearart,
       banner: artist.strArtistBanner,
-
-      // External IDs
       musicBrainzId: artist.strMusicBrainzID
     };
   }
@@ -145,7 +134,6 @@ class TheAudioDBManager {
       const artistData = await this.searchArtist(artistName);
 
       if (!artistData) {
-        Logger.metadata.debug(`TheAudioDB: Artist not found: ${artistName}`);
         return null;
       }
 

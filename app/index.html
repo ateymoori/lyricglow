@@ -152,6 +152,7 @@
           <button class="settings-tab active" data-tab="general">General</button>
           <button class="settings-tab" data-tab="appearance">Display</button>
           <button class="settings-tab" data-tab="storage">Cache</button>
+          <button class="settings-tab" data-tab="logs">Logs</button>
         </div>
 
         <div class="settings-body">
@@ -293,6 +294,27 @@
                 <span class="setting-label">Similar Artists</span>
               </div>
             </label>
+          </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div class="settings-section" id="tab-logs" style="display: none;">
+          <h3>Application Logs</h3>
+          <p class="settings-description">View and manage application logs for troubleshooting</p>
+
+          <div class="cache-header">
+            <div class="cache-stats" id="logsStats">
+              <span id="logsStatsText">Loading...</span>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <button class="btn-secondary" id="logsOpenFolderBtn">Open Folder</button>
+              <button class="btn-danger" id="logsClearBtn">Clear Logs</button>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h4>Log Location</h4>
+            <p class="setting-description" id="logsPath">~/Library/Logs/LyricGlow/main.log</p>
           </div>
         </div>
         </div>
