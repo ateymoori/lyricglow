@@ -55,6 +55,9 @@ function seekToPosition(e) {
   const percentage = Math.max(0, Math.min(1, clickX / rect.width));
   const newPosition = percentage * currentMusicData.duration;
 
+  internalPosition = newPosition;
+  lastSyncTime = Date.now();
+
   elements.progressBar.style.width = `${percentage * 100}%`;
   elements.currentTime.textContent = formatTime(newPosition);
 
@@ -266,6 +269,38 @@ const lyricsHandler = new LyricsHandler();
 let currentMusicData = null;
 let previousTrackKey = null;
 
+let internalPosition = 0;
+let internalIsPlaying = false;
+let lastSyncTime = Date.now();
+let internalAnimationRunning = false;
+
+function startInternalTimer() {
+  if (internalAnimationRunning) return;
+  internalAnimationRunning = true;
+  updateInternalPosition();
+}
+
+function updateInternalPosition() {
+  if (internalIsPlaying && currentMusicData && currentMusicData.duration) {
+    const now = Date.now();
+    const elapsed = (now - lastSyncTime) / 1000;
+    internalPosition += elapsed;
+    lastSyncTime = now;
+
+    if (internalPosition > currentMusicData.duration) {
+      internalPosition = currentMusicData.duration;
+    }
+
+    const progress = (internalPosition / currentMusicData.duration) * 100;
+    elements.progressBar.style.width = `${progress}%`;
+    elements.currentTime.textContent = formatTime(internalPosition);
+
+    lyricsHandler.updatePosition(internalPosition);
+  }
+
+  requestAnimationFrame(updateInternalPosition);
+}
+
 function formatTime(seconds) {
   if (!seconds || seconds < 0) return '0:00';
   const mins = Math.floor(seconds / 60);
@@ -296,6 +331,8 @@ function updateDisplay(data) {
     lyricsHandler.clear();
     metadataHandler.clear();
     previousTrackKey = null;
+    internalIsPlaying = false;
+    internalPosition = 0;
     return;
   }
 
@@ -303,6 +340,7 @@ function updateDisplay(data) {
   if (previousTrackKey && previousTrackKey !== currentTrackKey) {
     lyricsHandler.clear();
     metadataHandler.clear();
+    internalPosition = 0;
   }
   previousTrackKey = currentTrackKey;
 
@@ -324,11 +362,15 @@ function updateDisplay(data) {
   }
 
   if (data.duration && data.position !== undefined) {
-    const progress = (data.position / data.duration) * 100;
-    elements.progressBar.style.width = `${progress}%`;
-    elements.currentTime.textContent = formatTime(data.position);
+    internalPosition = data.position;
+    internalIsPlaying = data.isPlaying;
+    lastSyncTime = Date.now();
+
     elements.duration.textContent = formatTime(data.duration);
-    lyricsHandler.updatePosition(data.position);
+
+    if (!internalAnimationRunning) {
+      startInternalTimer();
+    }
   }
 
   updatePlayPauseButton(data.isPlaying);

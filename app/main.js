@@ -402,7 +402,7 @@ function createWindow() {
   mainWindow.webContents.once('did-finish-load', () => {
     Logger.app.info('Window loaded, starting music detection');
     pollMusicState();
-    pollInterval = setInterval(pollMusicState, 1000);
+    pollInterval = setInterval(pollMusicState, 3000);
   });
 }
 
