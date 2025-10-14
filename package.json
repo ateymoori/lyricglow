@@ -1,6 +1,6 @@
 {
   "name": "lyricglow",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Real-time synchronized lyrics and music metadata display for macOS.",
   "main": "app/main.js",
   "scripts": {
@@ -39,8 +39,10 @@
     "electron-builder": "^25.1.8"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
     "electron-log": "^5.4.3",
     "electron-store": "^10.0.0",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "vazirmatn": "^33.0.3"
   }
 }
