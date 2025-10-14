@@ -341,6 +341,16 @@ class FullLyricsModal {
     this.isOpen = false;
   }
 
+  refresh() {
+    if (!this.isOpen) return;
+
+    this.updateLyrics();
+    this.autoScrollEnabled = true;
+    this.elements.body.scrollTop = 0;
+
+    setTimeout(() => this.scrollToCurrentLine(), 100);
+  }
+
   updateLyrics() {
     const lyrics = this.lyricsHandler.lyrics;
     const container = this.lyricsHandler.container;
@@ -596,6 +606,7 @@ window.musicAPI.onLyricsUpdate((lyricsData) => {
     }
   } else {
     lyricsHandler.setLyrics(lyricsData);
+    fullLyricsModal.refresh();
     if (!isTrackChanging && currentMusicData && currentMusicData.position !== undefined) {
       lyricsHandler.updatePosition(internalPosition);
     }
