@@ -230,6 +230,7 @@ body {
   transition: width 0.5s ease;
   box-shadow: 0 0 12px rgba(0, 255, 159, 0.6);
   position: relative;
+  will-change: width;
 }
 
 .progress-fill::after {
@@ -424,6 +425,7 @@ body.no-music .track-title {
   display: inline-block;
   transition: all 0.3s ease;
   position: relative;
+  will-change: transform, opacity;
 }
 
 .lyrics-word.glowing {

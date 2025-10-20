@@ -95,6 +95,10 @@ class LyricsHandler {
     this.container = null;
     this.elements = {};
     this.isRTL = false;
+    this.cachedWords = [];
+    this.lastGlowUpdate = 0;
+    this.glowUpdateInterval = 33;
+    this.wordStates = [];
   }
 
   init() {
@@ -187,12 +191,18 @@ class LyricsHandler {
     this.elements.currentText.innerHTML = '';
     this.elements.currentText.style.direction = this.isRTL ? 'rtl' : 'ltr';
 
+    this.cachedWords = [];
+    this.wordStates = [];
+
     words.forEach((word, index) => {
       const span = document.createElement('span');
       span.className = 'lyrics-word';
       span.textContent = word;
       span.dataset.index = index;
       this.elements.currentText.appendChild(span);
+
+      this.cachedWords.push(span);
+      this.wordStates.push({ glowing: false, intensity: 0 });
 
       if (index < words.length - 1) {
         const space = document.createTextNode(' ');
@@ -217,32 +227,49 @@ class LyricsHandler {
   }
 
   applyWordGlow(progress) {
-    const words = this.elements.currentText.querySelectorAll('.lyrics-word');
-    if (!words.length) return;
+    const now = Date.now();
+    if (now - this.lastGlowUpdate < this.glowUpdateInterval) {
+      return;
+    }
+    this.lastGlowUpdate = now;
 
-    const totalWords = words.length;
+    if (!this.cachedWords.length) return;
+
+    const totalWords = this.cachedWords.length;
     const glowPosition = progress * totalWords;
 
-    words.forEach((word, index) => {
-      const wordIndex = index;
-      const wordProgress = Math.min(1, Math.max(0, glowPosition - wordIndex));
+    this.cachedWords.forEach((word, index) => {
+      const wordProgress = Math.min(1, Math.max(0, glowPosition - index));
+      const shouldGlow = wordProgress > 0;
+      const newIntensity = shouldGlow ? (wordProgress > 0.5 ? 1 : wordProgress * 2) : 0;
 
-      if (wordProgress > 0) {
-        const intensity = wordProgress > 0.5 ? 1 : wordProgress * 2;
-        word.style.setProperty('--glow-intensity', intensity);
-        word.classList.add('glowing');
-      } else {
-        word.classList.remove('glowing');
-        word.style.removeProperty('--glow-intensity');
+      const state = this.wordStates[index];
+
+      if (shouldGlow !== state.glowing || Math.abs(newIntensity - state.intensity) > 0.01) {
+        state.glowing = shouldGlow;
+        state.intensity = newIntensity;
+
+        if (shouldGlow) {
+          word.style.setProperty('--glow-intensity', newIntensity);
+          if (!word.classList.contains('glowing')) {
+            word.classList.add('glowing');
+          }
+        } else {
+          word.classList.remove('glowing');
+          word.style.removeProperty('--glow-intensity');
+        }
       }
     });
   }
 
   clearGlow() {
-    const words = this.elements.currentText.querySelectorAll('.lyrics-word');
-    words.forEach(word => {
+    this.cachedWords.forEach((word, index) => {
       word.classList.remove('glowing');
       word.style.removeProperty('--glow-intensity');
+      if (this.wordStates[index]) {
+        this.wordStates[index].glowing = false;
+        this.wordStates[index].intensity = 0;
+      }
     });
   }
 
@@ -272,7 +299,9 @@ class LyricsHandler {
     this.elements.previous.textContent = '';
     this.elements.currentText.innerHTML = '';
     this.elements.next.textContent = '';
-    this.clearGlow();
+    this.cachedWords = [];
+    this.wordStates = [];
+    this.lastGlowUpdate = 0;
   }
 }
 
