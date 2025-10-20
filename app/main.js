@@ -47,7 +47,9 @@ let mainWindow = null;
 let pollInterval = null;
 let currentTrackKey = null;
 let tray = null;
-let isPolling = false;
+let cachedScriptPath = null;
+let lastTrackData = null;
+let currentPollInterval = 1000;
 
 // Window behavior management
 let autoHideEnabled = false; // false = always show (default), true = show only when playing
@@ -179,10 +181,8 @@ function handleWindowVisibility(isPlaying) {
 // Tray lyrics functions
 function parseLRC(content) {
   if (!content) return [];
-
   const lines = content.split('\n');
   const lyrics = [];
-
   for (const line of lines) {
     const match = line.match(/^\[(\d{2}):(\d{2})\.(\d{2})\](.*)$/);
     if (match) {
@@ -208,7 +208,6 @@ function findCurrentLyricIndex(position) {
 function updateTrayLyrics(position) {
   if (!tray) return;
 
-  // Check if tray lyrics are disabled
   if (!trayLyricsEnabled) {
     if (lastTrayUpdate !== '') {
       tray.setTitle('');
@@ -217,7 +216,6 @@ function updateTrayLyrics(position) {
     return;
   }
 
-  // Check if lyrics are available
   if (currentLyrics.length === 0) {
     if (lastTrayUpdate !== '') {
       tray.setTitle('');
@@ -226,23 +224,16 @@ function updateTrayLyrics(position) {
     return;
   }
 
-  // Add 0.5s offset to sync with renderer's interpolated position
   const adjustedPosition = position + 0.5;
   const index = findCurrentLyricIndex(adjustedPosition);
 
   if (index !== currentLyricIndex) {
     currentLyricIndex = index;
-
     if (index >= 0 && currentLyrics[index]) {
       const text = currentLyrics[index].text;
-
       if (text && text !== '') {
-        // Truncate long lines to prevent menu bar crowding
         const maxLength = 60;
-        const displayText = text.length > maxLength
-          ? text.substring(0, maxLength - 3) + '...'
-          : text;
-
+        const displayText = text.length > maxLength ? text.substring(0, maxLength - 3) + '...' : text;
         if (displayText !== lastTrayUpdate) {
           tray.setTitle(displayText);
           lastTrayUpdate = displayText;
@@ -252,13 +243,7 @@ function updateTrayLyrics(position) {
   }
 }
 
-function pollMusicState() {
-  if (isPolling) {
-    return;
-  }
-
-  isPolling = true;
-
+function initCachedScript() {
   const script = `set output to "{}"
 
 on escapeJSON(txt)
@@ -367,37 +352,67 @@ end if
 
 return output`;
 
-  const tmpFile = path.join(app.getPath('temp'), 'music-poll.scpt');
-  fs.writeFileSync(tmpFile, script, 'utf8');
+  cachedScriptPath = path.join(app.getPath('temp'), 'lyricglow-music-poll.scpt');
+  fs.writeFileSync(cachedScriptPath, script, 'utf8');
+  Logger.app.info('AppleScript cached for polling');
+}
 
-  exec(`osascript "${tmpFile}"`, (error, stdout) => {
-    isPolling = false;
+function pollMusicState() {
+  if (!cachedScriptPath) {
+    Logger.music.error('Cached script not initialized');
+    return;
+  }
 
-    try {
-      fs.unlinkSync(tmpFile);
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-
+  exec(`osascript "${cachedScriptPath}"`, (error, stdout) => {
     if (error) {
       Logger.music.error('AppleScript execution failed', error);
+      updatePollInterval(null);
       return;
     }
 
     const scriptOutput = stdout.trim();
     if (!scriptOutput || scriptOutput === '{}') {
       broadcastMusicUpdate(null);
+      updatePollInterval(null);
       return;
     }
 
     try {
       const trackData = JSON.parse(scriptOutput);
-      broadcastMusicUpdate(trackData);
+      const dataChanged = !lastTrackData ||
+        lastTrackData.title !== trackData.title ||
+        lastTrackData.artist !== trackData.artist ||
+        lastTrackData.isPlaying !== trackData.isPlaying ||
+        Math.abs((lastTrackData.position || 0) - (trackData.position || 0)) > 2;
+
+      if (dataChanged) {
+        lastTrackData = trackData;
+        broadcastMusicUpdate(trackData);
+      }
+
+      updatePollInterval(trackData);
     } catch (e) {
       Logger.music.error('Failed to parse music data', e);
-      Logger.music.debug('Invalid JSON output:', scriptOutput);
+      updatePollInterval(null);
     }
   });
+}
+
+function updatePollInterval(trackData) {
+  let newInterval = 5000;
+
+  if (trackData && trackData.nowPlayingAvailable) {
+    newInterval = trackData.isPlaying ? 500 : 2000;
+  }
+
+  if (newInterval !== currentPollInterval) {
+    currentPollInterval = newInterval;
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = setInterval(pollMusicState, currentPollInterval);
+      Logger.music.debug(`Poll interval adjusted to ${currentPollInterval}ms`);
+    }
+  }
 }
 
 async function broadcastMusicUpdate(trackData) {
@@ -623,6 +638,10 @@ function createWindow() {
   const windowHeight = 600;
   const padding = 20;
 
+  app.commandLine.appendSwitch('enable-gpu-rasterization');
+  app.commandLine.appendSwitch('enable-zero-copy');
+  app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds');
+
   mainWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -665,8 +684,9 @@ function createWindow() {
 
   mainWindow.webContents.once('did-finish-load', () => {
     Logger.app.info('Window loaded, starting music detection');
+    initCachedScript();
     pollMusicState();
-    pollInterval = setInterval(pollMusicState, 1000);
+    pollInterval = setInterval(pollMusicState, currentPollInterval);
   });
 }
 
@@ -737,112 +757,46 @@ ipcMain.on('open:external', (_event, url) => {
   }
 });
 
-ipcMain.on('music:seek', (_event, position) => {
-  if (position === null || position === undefined) return;
-
-  const positionInSeconds = Math.floor(position);
+function executeMediaControl(command, param = null) {
+  const spotifyCmd = param !== null ? `${command} to ${param}` : command;
+  const musicCmd = param !== null ? `${command} to ${param}` : command;
 
   const script = `
     if application "Spotify" is running then
       try
-        tell application "Spotify"
-          set player position to ${positionInSeconds}
-        end tell
+        tell application "Spotify" to ${spotifyCmd}
       end try
     end if
-
     if application "Music" is running then
       try
-        tell application "Music"
-          set player position to ${positionInSeconds}
-        end tell
+        tell application "Music" to ${musicCmd}
       end try
     end if
   `;
 
   exec(`osascript -e '${script}'`, (error) => {
     if (error) {
-      Logger.music.error('Seek failed', error);
+      Logger.music.error(`Media control failed: ${command}`, error);
     }
   });
+}
+
+ipcMain.on('music:seek', (_event, position) => {
+  if (position !== null && position !== undefined) {
+    executeMediaControl('set player position', Math.floor(position));
+  }
 });
 
 ipcMain.on('music:play-pause', () => {
-  const script = `
-    if application "Spotify" is running then
-      try
-        tell application "Spotify"
-          playpause
-        end tell
-      end try
-    end if
-
-    if application "Music" is running then
-      try
-        tell application "Music"
-          playpause
-        end tell
-      end try
-    end if
-  `;
-
-  exec(`osascript -e '${script}'`, (error) => {
-    if (error) {
-      Logger.music.error('Play/pause failed', error);
-    }
-  });
+  executeMediaControl('playpause');
 });
 
 ipcMain.on('music:next', () => {
-  const script = `
-    if application "Spotify" is running then
-      try
-        tell application "Spotify"
-          next track
-        end tell
-      end try
-    end if
-
-    if application "Music" is running then
-      try
-        tell application "Music"
-          next track
-        end tell
-      end try
-    end if
-  `;
-
-  exec(`osascript -e '${script}'`, (error) => {
-    if (error) {
-      Logger.music.error('Next track failed', error);
-    }
-  });
+  executeMediaControl('next track');
 });
 
 ipcMain.on('music:previous', () => {
-  const script = `
-    if application "Spotify" is running then
-      try
-        tell application "Spotify"
-          previous track
-        end tell
-      end try
-    end if
-
-    if application "Music" is running then
-      try
-        tell application "Music"
-          previous track
-        end tell
-      end try
-    end if
-  `;
-
-  exec(`osascript -e '${script}'`, (error) => {
-    if (error) {
-      Logger.music.error('Previous track failed', error);
-    }
-  });
+  executeMediaControl('previous track');
 });
 
 ipcMain.handle('cache:image', async (_event, url) => {
@@ -992,5 +946,13 @@ app.on('before-quit', () => {
   clearTimeout(hideTimeout);
   if (pollInterval) {
     clearInterval(pollInterval);
+  }
+  if (cachedScriptPath) {
+    try {
+      fs.unlinkSync(cachedScriptPath);
+      Logger.app.info('Cached script cleaned up');
+    } catch (e) {
+      Logger.app.debug('Cache cleanup skipped (file not found)');
+    }
   }
 });
