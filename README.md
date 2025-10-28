@@ -10,6 +10,7 @@ Experience your music like never before with **word-by-word synchronized lyrics*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.4.0-brightgreen.svg)](#)
+[![Downloads](https://img.shields.io/github/downloads/ateymoori/lyricglow/total?style=flat&logo=github&label=Downloads)](https://github.com/ateymoori/lyricglow/releases)
 [![macOS](https://img.shields.io/badge/macOS-11.0+-lightgrey.svg?logo=apple)](https://www.apple.com/macos)
 [![Electron](https://img.shields.io/badge/Electron-33.4.11-47848F.svg?logo=electron)](https://www.electronjs.org/)
 
