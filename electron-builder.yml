@@ -2,10 +2,16 @@ appId: com.lyricglow.app
 productName: LyricGlow
 directories:
   buildResources: build
-  output: dist
+  output: release
 files:
-  - app/**/*
-  - assets/fonts/**/*
+  - dist/main/**/*
+  - dist/preload/**/*
+  - dist/renderer/**/*
+  - "!dist/mac/**/*"
+  - "!dist/mac-arm64/**/*"
+  - "!dist/*.dmg"
+  - "!dist/*.yml"
+  - resources/**/*
   - .env
   - node_modules/electron-log/**/*
   - node_modules/electron-store/**/*

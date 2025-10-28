@@ -1,33 +1,85 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, globalShortcut } = require('electron');
-const { exec } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-const Logger = require('./utils/Logger');
-const UnifiedCacheManager = require('./cache/UnifiedCacheManager');
-const LyricsManager = require('./lyrics/LyricsManager');
-const TheAudioDBManager = require('./metadata/TheAudioDBManager');
-const ImageCacheManager = require('./cache/ImageCacheManager');
-const SpotifyAuth = require('./auth/SpotifyAuth');
-const SpotifyMetadataManager = require('./metadata/SpotifyMetadataManager');
+/**
+ * Main Process Entry Point
+ *
+ * Handles app lifecycle, window management, tray integration, music detection,
+ * and IPC communication with renderer process.
+ */
 
-function loadConfig() {
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  shell,
+  Tray,
+  Menu,
+  globalShortcut,
+  screen
+} from 'electron';
+import { exec } from 'child_process';
+import path from 'path';
+import fs from 'fs';
+import type Store from 'electron-store';
+import Logger from '../shared/utils/Logger';
+import UnifiedCacheManager from './managers/UnifiedCacheManager';
+import LyricsManager from './managers/LyricsManager';
+import TheAudioDBManager from './managers/TheAudioDBManager';
+import ImageCacheManager from './managers/ImageCacheManager';
+import SpotifyAuth from './auth/SpotifyAuth';
+import SpotifyMetadataManager from './managers/SpotifyMetadataManager';
+
+// Type definitions
+interface Config {
+  CACHE_DURATION_HOURS: number;
+}
+
+interface TrackData {
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  position: number;
+  isPlaying: boolean;
+  nowPlayingAvailable: boolean;
+  artworkUrl?: string;
+  spotifyUrl?: string;
+  popularity?: number;
+  trackNumber?: number;
+  discNumber?: number;
+  year?: string;
+  genre?: string;
+  rating?: number;
+  playCount?: number;
+  bpm?: number;
+  trackCount?: number;
+  discCount?: number;
+}
+
+interface MergedMetadata {
+  artist: any;
+  topTracks?: any[] | null;
+  topAlbums?: any[] | null;
+  hasSpotifyData: boolean;
+}
+
+
+function loadConfig(): Config {
   try {
-    const envPath = path.join(__dirname, '../.env');
+    const envPath = path.join(__dirname, '../../.env');
     if (fs.existsSync(envPath)) {
       const envContent = fs.readFileSync(envPath, 'utf8');
-      const config = {};
-      envContent.split('\n').forEach(line => {
+      const config: Partial<Config> = {};
+      envContent.split('\n').forEach((line) => {
         if (line.includes('=')) {
-          const [key, value] = line.split('=').map(s => s.trim());
-          if (key === 'CACHE_DURATION_HOURS') {
+          const [key, value] = line.split('=').map((s) => s.trim());
+          if (key === 'CACHE_DURATION_HOURS' && value) {
             config[key] = parseInt(value) || 168;
           }
         }
       });
-      return config;
+      return { CACHE_DURATION_HOURS: config.CACHE_DURATION_HOURS || 168 };
     }
   } catch (error) {
-    Logger.app.error('Failed to load config', error);
+    Logger.app.error('Failed to load config', error as Error);
   }
   return { CACHE_DURATION_HOURS: 168 };
 }
@@ -43,44 +95,46 @@ const imageCache = new ImageCacheManager(unifiedCache);
 const spotifyAuth = new SpotifyAuth();
 const spotifyMetadataManager = new SpotifyMetadataManager(spotifyAuth, unifiedCache);
 
-let mainWindow = null;
-let pollInterval = null;
-let currentTrackKey = null;
-let tray = null;
-let cachedScriptPath = null;
-let lastTrackData = null;
+let mainWindow: BrowserWindow | null = null;
+let pollInterval: NodeJS.Timeout | null = null;
+let currentTrackKey: string | null = null;
+let tray: Tray | null = null;
+let cachedScriptPath: string | null = null;
+let lastTrackData: TrackData | null = null;
 let currentPollInterval = 1000;
 
 // Window behavior management
 let autoHideEnabled = false; // false = always show (default), true = show only when playing
 let manualOverride = false;
-let hideTimeout = null;
-let settingsStore = null;
+let hideTimeout: NodeJS.Timeout | null = null;
+let settingsStore: Store | null = null;
 
 // Tray lyrics setting
 let trayLyricsEnabled = true; // Show lyrics in system tray (default: enabled)
 
 // Register custom protocol for OAuth callback (must be before app.whenReady)
 if (process.defaultApp) {
-  if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient('musicdisplay', process.execPath, [path.resolve(process.argv[1])]);
+  if (process.argv.length >= 2 && process.argv[1]) {
+    app.setAsDefaultProtocolClient('musicdisplay', process.execPath, [
+      path.resolve(process.argv[1])
+    ]);
   }
 } else {
   app.setAsDefaultProtocolClient('musicdisplay');
 }
 
 // Settings store management
-async function getSettingsStore() {
+async function getSettingsStore(): Promise<Store> {
   if (!settingsStore) {
-    const Store = (await import('electron-store')).default;
-    settingsStore = new Store();
-    autoHideEnabled = settingsStore.get('autoHideEnabled', false);
-    trayLyricsEnabled = settingsStore.get('trayLyricsEnabled', true);
+    const StoreModule = await import('electron-store');
+    settingsStore = new StoreModule.default();
+    autoHideEnabled = settingsStore.get('autoHideEnabled', false) as boolean;
+    trayLyricsEnabled = settingsStore.get('trayLyricsEnabled', true) as boolean;
   }
   return settingsStore;
 }
 
-function saveAutoHideSetting(enabled) {
+function saveAutoHideSetting(enabled: boolean): void {
   autoHideEnabled = enabled;
   if (settingsStore) {
     settingsStore.set('autoHideEnabled', enabled);
@@ -88,7 +142,7 @@ function saveAutoHideSetting(enabled) {
   Logger.app.info(`Auto-hide ${enabled ? 'enabled' : 'disabled'}`);
 }
 
-function saveTrayLyricsSetting(enabled) {
+function saveTrayLyricsSetting(enabled: boolean): void {
   trayLyricsEnabled = enabled;
   if (settingsStore) {
     settingsStore.set('trayLyricsEnabled', enabled);
@@ -103,7 +157,7 @@ function saveTrayLyricsSetting(enabled) {
 }
 
 // Window visibility control
-function showWindow(shouldFocus = false) {
+function showWindow(shouldFocus: boolean = false): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     if (shouldFocus) {
@@ -112,13 +166,13 @@ function showWindow(shouldFocus = false) {
   }
 }
 
-function hideWindow() {
+function hideWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.hide();
   }
 }
 
-function toggleWindow() {
+function toggleWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isVisible()) {
       manualOverride = true;
@@ -134,7 +188,7 @@ function toggleWindow() {
   }
 }
 
-function handleTrayClick() {
+function handleTrayClick(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isVisible()) {
       mainWindow.focus();
@@ -147,10 +201,10 @@ function handleTrayClick() {
   }
 }
 
-function handleWindowVisibility(isPlaying) {
+function handleWindowVisibility(isPlaying: boolean): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
-  clearTimeout(hideTimeout);
+  if (hideTimeout) clearTimeout(hideTimeout);
 
   if (!autoHideEnabled) {
     // Always show mode - keep window visible
@@ -179,18 +233,18 @@ function handleWindowVisibility(isPlaying) {
  * Receives current lyrics text from renderer process and displays in system tray
  * This is the single entry point for tray updates - no state management here
  */
-function handleTrayLyricsUpdate(text) {
+function handleTrayLyricsUpdate(text: string): void {
   if (!tray || !trayLyricsEnabled) return;
 
   // Truncate to 60 characters with ellipsis
   const maxLength = 60;
-  const displayText = text.length > maxLength ?
-    text.substring(0, maxLength - 3) + '...' : text;
+  const displayText =
+    text.length > maxLength ? text.substring(0, maxLength - 3) + '...' : text;
 
   tray.setTitle(displayText);
 }
 
-function initCachedScript() {
+function initCachedScript(): void {
   const script = `set output to "{}"
 
 on escapeJSON(txt)
@@ -304,7 +358,7 @@ return output`;
   Logger.app.info('AppleScript cached for polling');
 }
 
-function pollMusicState() {
+function pollMusicState(): void {
   if (!cachedScriptPath) {
     Logger.music.error('Cached script not initialized');
     return;
@@ -325,8 +379,9 @@ function pollMusicState() {
     }
 
     try {
-      const trackData = JSON.parse(scriptOutput);
-      const dataChanged = !lastTrackData ||
+      const trackData = JSON.parse(scriptOutput) as TrackData;
+      const dataChanged =
+        !lastTrackData ||
         lastTrackData.title !== trackData.title ||
         lastTrackData.artist !== trackData.artist ||
         lastTrackData.isPlaying !== trackData.isPlaying ||
@@ -339,13 +394,13 @@ function pollMusicState() {
 
       updatePollInterval(trackData);
     } catch (e) {
-      Logger.music.error('Failed to parse music data', e);
+      Logger.music.error('Failed to parse music data', e as Error);
       updatePollInterval(null);
     }
   });
 }
 
-function updatePollInterval(trackData) {
+function updatePollInterval(trackData: TrackData | null): void {
   let newInterval = 5000;
 
   if (trackData && trackData.nowPlayingAvailable) {
@@ -362,7 +417,7 @@ function updatePollInterval(trackData) {
   }
 }
 
-async function broadcastMusicUpdate(trackData) {
+async function broadcastMusicUpdate(trackData: TrackData | null): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('music:update', trackData);
 
@@ -377,7 +432,9 @@ async function broadcastMusicUpdate(trackData) {
         const [lyricsData, audioDBMetadata, spotifyMetadata] = await Promise.all([
           lyricsManager.fetchLyrics(trackData.title, trackData.artist),
           audioDBManager.fetchMetadata(trackData.artist),
-          spotifyAuth.isLoggedIn() ? spotifyMetadataManager.fetchMetadata(trackData) : Promise.resolve(null)
+          spotifyAuth.isLoggedIn()
+            ? spotifyMetadataManager.fetchMetadata(trackData)
+            : Promise.resolve(null)
         ]);
 
         const mergedMetadata = mergeArtistMetadata(audioDBMetadata, spotifyMetadata);
@@ -407,7 +464,7 @@ async function broadcastMusicUpdate(trackData) {
   }
 }
 
-function mergeArtistMetadata(audioDBData, spotifyData) {
+function mergeArtistMetadata(audioDBData: any, spotifyData: any): MergedMetadata | null {
   if (!audioDBData && !spotifyData) return null;
 
   if (!spotifyData) {
@@ -416,7 +473,7 @@ function mergeArtistMetadata(audioDBData, spotifyData) {
       artist: {
         ...audioDBData.artist,
         allImages: audioDBData.artist.allImages
-          .filter(img => img && img !== '')
+          .filter((img: string) => img && img !== '')
           .slice(0, 8)
       },
       hasSpotifyData: false
@@ -427,7 +484,7 @@ function mergeArtistMetadata(audioDBData, spotifyData) {
     return {
       artist: {
         ...spotifyData.artist,
-        allImages: spotifyData.artist.images.map(img => img.url)
+        allImages: spotifyData.artist.images.map((img: any) => img.url)
       },
       topTracks: spotifyData.topTracks,
       topAlbums: spotifyData.topAlbums,
@@ -438,12 +495,9 @@ function mergeArtistMetadata(audioDBData, spotifyData) {
   const mergedArtist = {
     ...audioDBData.artist,
     ...(spotifyData.artist && {
-      allImages: [
-        spotifyData.artist.images[0]?.url,
-        ...audioDBData.artist.allImages
-      ]
-        .filter(img => img && img !== '')
-        .filter((img, index, self) => self.indexOf(img) === index)
+      allImages: [spotifyData.artist.images[0]?.url, ...audioDBData.artist.allImages]
+        .filter((img: string) => img && img !== '')
+        .filter((img: string, index: number, self: string[]) => self.indexOf(img) === index)
         .slice(0, 8),
       spotifyPopularity: spotifyData.artist.popularity,
       spotifyGenres: spotifyData.artist.genres,
@@ -453,29 +507,31 @@ function mergeArtistMetadata(audioDBData, spotifyData) {
 
   return {
     artist: mergedArtist,
-    topTracks: spotifyData.topTracks && spotifyData.topTracks.length > 0
-      ? spotifyData.topTracks.map(t => ({
-          name: t.name,
-          playcount: t.popularity,
-          image: t.album.images[0]?.url || null,
-          artist: t.artist,
-          url: t.url
-        }))
-      : null,
-    topAlbums: spotifyData.topAlbums && spotifyData.topAlbums.length > 0
-      ? spotifyData.topAlbums.map(a => ({
-          name: a.name,
-          playcount: a.total_tracks + ' tracks',
-          image: a.images[0]?.url || null,
-          artist: a.artist,
-          url: a.url
-        }))
-      : null,
+    topTracks:
+      spotifyData.topTracks && spotifyData.topTracks.length > 0
+        ? spotifyData.topTracks.map((t: any) => ({
+            name: t.name,
+            playcount: t.popularity,
+            image: t.album.images[0]?.url || null,
+            artist: t.artist,
+            url: t.url
+          }))
+        : null,
+    topAlbums:
+      spotifyData.topAlbums && spotifyData.topAlbums.length > 0
+        ? spotifyData.topAlbums.map((a: any) => ({
+            name: a.name,
+            playcount: a.total_tracks + ' tracks',
+            image: a.images[0]?.url || null,
+            artist: a.artist,
+            url: a.url
+          }))
+        : null,
     hasSpotifyData: true
   };
 }
 
-function updateTrayMenu() {
+function updateTrayMenu(): void {
   if (!tray) return;
 
   const isVisible = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
@@ -532,7 +588,7 @@ function updateTrayMenu() {
     {
       label: 'Quit',
       click: () => {
-        app.isQuitting = true;
+        (app as any).isQuitting = true;
         app.quit();
       }
     }
@@ -541,7 +597,7 @@ function updateTrayMenu() {
   tray.setContextMenu(contextMenu);
 }
 
-function createTray() {
+function createTray(): void {
   try {
     const iconName = process.platform === 'darwin' ? 'iconTemplate.png' : 'icon.png';
 
@@ -549,14 +605,13 @@ function createTray() {
     // In development, icons are in build folder
     const iconPath = app.isPackaged
       ? path.join(process.resourcesPath, iconName)
-      : path.join(__dirname, '../build', iconName);
+      : path.join(__dirname, '../../build', iconName);
 
     tray = new Tray(iconPath);
     tray.setToolTip('LyricGlow');
     Logger.app.info('System tray created successfully');
   } catch (error) {
-    Logger.app.error('Tray creation failed:', error.message);
-    Logger.app.debug('Attempted icon path:', iconPath);
+    Logger.app.error('Tray creation failed:', (error as Error).message);
     return;
   }
 
@@ -565,10 +620,9 @@ function createTray() {
   tray.on('click', () => handleTrayClick());
 }
 
-function createWindow() {
-  const { screen } = require('electron');
+function createWindow(): void {
   const primaryDisplay = screen.getPrimaryDisplay();
-  const { width, height } = primaryDisplay.workArea;
+  const { width } = primaryDisplay.workArea;
 
   const windowWidth = 550;
   const windowHeight = 600;
@@ -595,7 +649,7 @@ function createWindow() {
     hasShadow: true,
     show: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
       contextIsolation: true,
       devTools: process.env.NODE_ENV === 'development'
@@ -608,7 +662,7 @@ function createWindow() {
   Logger.app.debug(`Window positioned at: x=${width - windowWidth - padding}, y=${padding}`);
 
   mainWindow.on('close', (event) => {
-    if (!app.isQuitting) {
+    if (!(app as any).isQuitting) {
       event.preventDefault();
       manualOverride = true;
       hideWindow();
@@ -616,7 +670,7 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.loadFile(path.join(__dirname, '../renderer/resources/index.html'));
 
   mainWindow.webContents.once('did-finish-load', () => {
     Logger.app.info('Window loaded, starting music detection');
@@ -639,9 +693,9 @@ app.on('open-url', async (event, url) => {
         mainWindow.webContents.send('spotify:logged-in');
       }
     } catch (error) {
-      Logger.auth.error('OAuth callback failed', error);
+      Logger.auth.error('OAuth callback failed', error as Error);
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('spotify:login-error', error.message);
+        mainWindow.webContents.send('spotify:login-error', (error as Error).message);
       }
     }
   }
@@ -669,8 +723,8 @@ app.whenReady().then(async () => {
   createTray();
   createWindow();
 
-  unifiedCache.clearExpired().catch(err => {
-    Logger.cache.error('Background cache cleanup failed', err);
+  unifiedCache.clearExpired().catch((err) => {
+    Logger.cache.error('Background cache cleanup failed', err as Error);
   });
 
   if (spotifyAuth.isLoggedIn()) {
@@ -683,22 +737,22 @@ ipcMain.on('app:quit', () => {
   if (pollInterval) {
     clearInterval(pollInterval);
   }
-  app.isQuitting = true;
+  (app as any).isQuitting = true;
   app.quit();
 });
 
 // Tray lyrics IPC handler (unified sync from renderer)
-ipcMain.on('tray:update-lyrics', (_event, text) => {
+ipcMain.on('tray:update-lyrics', (_event, text: string) => {
   handleTrayLyricsUpdate(text);
 });
 
-ipcMain.on('open:external', (_event, url) => {
+ipcMain.on('open:external', (_event, url: string) => {
   if (url && typeof url === 'string') {
     shell.openExternal(url);
   }
 });
 
-function executeMediaControl(command, param = null) {
+function executeMediaControl(command: string, param: number | null = null): void {
   const spotifyCmd = param !== null ? `${command} to ${param}` : command;
   const musicCmd = param !== null ? `${command} to ${param}` : command;
 
@@ -722,7 +776,7 @@ function executeMediaControl(command, param = null) {
   });
 }
 
-ipcMain.on('music:seek', (_event, position) => {
+ipcMain.on('music:seek', (_event, position: number) => {
   if (position !== null && position !== undefined) {
     executeMediaControl('set player position', Math.floor(position));
   }
@@ -740,7 +794,7 @@ ipcMain.on('music:previous', () => {
   executeMediaControl('previous track');
 });
 
-ipcMain.handle('cache:image', async (_event, url) => {
+ipcMain.handle('cache:image', async (_event, url: string) => {
   if (!url || typeof url !== 'string') {
     return null;
   }
@@ -748,7 +802,7 @@ ipcMain.handle('cache:image', async (_event, url) => {
     const cachedImage = await imageCache.getImage(url);
     return cachedImage;
   } catch (error) {
-    Logger.cache.error('Image cache failed', error);
+    Logger.cache.error('Image cache failed', error as Error);
     return null;
   }
 });
@@ -762,7 +816,7 @@ ipcMain.handle('spotify:get-user-profile', async () => {
   try {
     return await spotifyAuth.getUserProfile();
   } catch (error) {
-    Logger.auth.error('Failed to fetch user profile', error);
+    Logger.auth.error('Failed to fetch user profile', error as Error);
     return null;
   }
 });
@@ -771,9 +825,9 @@ ipcMain.on('spotify:login', async () => {
   try {
     await spotifyAuth.startAuthFlow();
   } catch (error) {
-    Logger.auth.error('Login failed', error);
+    Logger.auth.error('Login failed', error as Error);
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('spotify:login-error', error.message);
+      mainWindow.webContents.send('spotify:login-error', (error as Error).message);
     }
   }
 });
@@ -788,7 +842,7 @@ ipcMain.on('spotify:logout', () => {
 ipcMain.handle('cache:list', async () => {
   const entries = unifiedCache.listAllEntries();
   const enriched = await Promise.all(
-    entries.map(async entry => ({
+    entries.map(async (entry) => ({
       ...entry,
       size: await unifiedCache.getEntrySize(entry.type, entry.key)
     }))
@@ -796,7 +850,7 @@ ipcMain.handle('cache:list', async () => {
   return enriched;
 });
 
-ipcMain.handle('cache:delete', async (_event, type, key) => {
+ipcMain.handle('cache:delete', async (_event, type: string, key: string) => {
   return await unifiedCache.deleteOne(type, key);
 });
 
@@ -805,17 +859,17 @@ ipcMain.handle('cache:clear-all', async () => {
   return true;
 });
 
-let visibilityStore = null;
+let visibilityStore: Store | null = null;
 
-async function getVisibilityStore() {
+async function getVisibilityStore(): Promise<Store> {
   if (!visibilityStore) {
-    const Store = (await import('electron-store')).default;
-    visibilityStore = new Store();
+    const StoreModule = await import('electron-store');
+    visibilityStore = new StoreModule.default();
   }
   return visibilityStore;
 }
 
-ipcMain.handle('visibility:get', async (_event, key) => {
+ipcMain.handle('visibility:get', async (_event, key?: string) => {
   const store = await getVisibilityStore();
   const defaults = {
     player: true,
@@ -827,14 +881,14 @@ ipcMain.handle('visibility:get', async (_event, key) => {
     albums: true,
     similar: true
   };
-  
+
   if (key) {
-    return store.get(`visibility.${key}`, defaults[key]);
+    return store.get(`visibility.${key}`, defaults[key as keyof typeof defaults]);
   }
   return store.get('visibility', defaults);
 });
 
-ipcMain.handle('visibility:set', async (_event, key, value) => {
+ipcMain.handle('visibility:set', async (_event, key: string, value: boolean) => {
   const store = await getVisibilityStore();
   store.set(`visibility.${key}`, value);
   return true;
@@ -850,7 +904,7 @@ ipcMain.handle('settings:get-launch-at-login', () => {
   return app.getLoginItemSettings().openAtLogin;
 });
 
-ipcMain.handle('settings:set-launch-at-login', (_event, enabled) => {
+ipcMain.handle('settings:set-launch-at-login', (_event, enabled: boolean) => {
   app.setLoginItemSettings({
     openAtLogin: enabled,
     openAsHidden: false
@@ -862,7 +916,7 @@ ipcMain.handle('settings:get-tray-lyrics', () => {
   return trayLyricsEnabled;
 });
 
-ipcMain.handle('settings:set-tray-lyrics', (_event, enabled) => {
+ipcMain.handle('settings:set-tray-lyrics', (_event, enabled: boolean) => {
   saveTrayLyricsSetting(enabled);
   return true;
 });
@@ -882,9 +936,9 @@ ipcMain.handle('logs:clear', async () => {
 });
 
 app.on('before-quit', () => {
-  app.isQuitting = true;
+  (app as any).isQuitting = true;
   globalShortcut.unregisterAll();
-  clearTimeout(hideTimeout);
+  if (hideTimeout) clearTimeout(hideTimeout);
   if (pollInterval) {
     clearInterval(pollInterval);
   }

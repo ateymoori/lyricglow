@@ -1,14 +1,17 @@
 {
   "name": "lyricglow",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Real-time synchronized lyrics and music metadata display for macOS.",
-  "main": "app/main.js",
+  "main": "dist/main/index.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "ELECTRON_ENABLE_LOGGING=1 electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
     "release": "bash scripts/release.sh"
   },
   "keywords": [
@@ -35,8 +38,14 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@types/node": "^24.9.1",
+    "@types/node-fetch": "^2.6.13",
     "electron": "^33.1.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^4.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
   },
   "dependencies": {
     "electron-log": "^5.4.3",

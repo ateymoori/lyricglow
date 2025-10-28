@@ -1,28 +1,72 @@
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const Logger = require('../utils/Logger');
+/**
+ * Unified Cache Manager
+ *
+ * File-based caching system with automatic expiry and offline support.
+ * Stores lyrics, metadata, and images with configurable TTL (default: 7 days).
+ */
+
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import https from 'https';
+import Logger from '../../shared/utils/Logger';
+
+interface CacheConfig {
+  CACHE_DURATION_HOURS?: number;
+}
+
+interface CacheEntry {
+  key: string;
+  timestamp: number;
+  file: string;
+}
+
+interface CacheIndex {
+  [type: string]: {
+    [hash: string]: CacheEntry;
+  };
+}
+
+interface CacheStats {
+  types: { [type: string]: number };
+  total: number;
+  oldestEntry: number | null;
+  newestEntry: number | null;
+}
+
+interface CacheListEntry {
+  type: string;
+  key: string;
+  timestamp: number;
+  file: string;
+  hash: string;
+}
 
 class UnifiedCacheManager {
-  constructor(config = {}, cachePath = null) {
-    this.cacheRoot = cachePath || path.join(__dirname, '../../.cache');
+  private cacheRoot: string;
+  private indexPath: string;
+  private cacheExpiry: number;
+  private index: CacheIndex = {};
+  private onlineStatus: boolean | null = null;
+  private initPromise: Promise<void>;
+
+  constructor(config: CacheConfig = {}, cachePath: string | null = null) {
+    this.cacheRoot = cachePath || path.join(__dirname, '../../../.cache');
     this.indexPath = path.join(this.cacheRoot, 'index.json');
     this.cacheExpiry = (config.CACHE_DURATION_HOURS || 168) * 60 * 60 * 1000;
-    this.index = {};
-    this.onlineStatus = null;
     this.initPromise = this.init();
   }
 
-  async init() {
+  private async init(): Promise<void> {
     try {
       await this.ensureCacheDirectoriesAsync();
       this.index = await this.loadIndexAsync();
     } catch (error) {
-      Logger.cache.error('Cache initialization failed', error);
+      Logger.cache.error('Cache initialization failed', error as Error);
     }
   }
 
-  async ensureCacheDirectoriesAsync() {
+  private async ensureCacheDirectoriesAsync(): Promise<void> {
     const dirs = [
       this.cacheRoot,
       path.join(this.cacheRoot, 'images'),
@@ -34,40 +78,39 @@ class UnifiedCacheManager {
     );
   }
 
-  async loadIndexAsync() {
+  private async loadIndexAsync(): Promise<CacheIndex> {
     try {
       const data = await fs.promises.readFile(this.indexPath, 'utf8');
-      return JSON.parse(data);
+      return JSON.parse(data) as CacheIndex;
     } catch (error) {
       return {};
     }
   }
 
-  async saveIndex() {
+  private async saveIndex(): Promise<void> {
     try {
       await fs.promises.writeFile(this.indexPath, JSON.stringify(this.index, null, 2));
     } catch (error) {
-      Logger.cache.error('Failed to save cache index', error);
+      Logger.cache.error('Failed to save cache index', error as Error);
     }
   }
 
-  generateHash(key) {
+  private generateHash(key: string): string {
     return crypto.createHash('sha256').update(key).digest('hex').substring(0, 32);
   }
 
-  getCacheFilePath(type, key) {
+  private getCacheFilePath(type: string, key: string): string {
     const hash = this.generateHash(key);
     const extension = type === 'images' ? 'jpg' : 'json';
     return path.join(this.cacheRoot, type, `${hash}.${extension}`);
   }
 
-  async isOnline() {
+  private async isOnline(): Promise<boolean> {
     if (this.onlineStatus !== null) {
       return this.onlineStatus;
     }
 
     return new Promise((resolve) => {
-      const https = require('https');
       const req = https.request({
         hostname: 'www.google.com',
         path: '/',
@@ -93,25 +136,25 @@ class UnifiedCacheManager {
     });
   }
 
-  shouldRefresh(timestamp, isOnline) {
+  private shouldRefresh(timestamp: number, isOnline: boolean): boolean {
     if (!isOnline) return false;
     const age = Date.now() - timestamp;
     return age > this.cacheExpiry;
   }
 
-  async has(type, key) {
+  async has(type: string, key: string): Promise<boolean> {
     await this.initPromise;
     if (!this.index[type]) return false;
     const hash = this.generateHash(key);
-    return !!this.index[type][hash];
+    return !!this.index[type]?.[hash];
   }
 
-  async get(type, key) {
+  async get(type: string, key: string): Promise<any> {
     await this.initPromise;
     if (!this.index[type]) return null;
 
     const hash = this.generateHash(key);
-    const entry = this.index[type][hash];
+    const entry = this.index[type]?.[hash];
 
     if (!entry) return null;
 
@@ -120,7 +163,7 @@ class UnifiedCacheManager {
     try {
       await fs.promises.access(filePath);
     } catch {
-      delete this.index[type][hash];
+      delete this.index[type]![hash];
       this.saveIndex();
       return null;
     }
@@ -140,12 +183,12 @@ class UnifiedCacheManager {
         return JSON.parse(content);
       }
     } catch (error) {
-      Logger.cache.error(`Read failed for ${type}/${key}`, error);
+      Logger.cache.error(`Read failed for ${type}/${key}`, error as Error);
       return null;
     }
   }
 
-  async set(type, key, data) {
+  async set(type: string, key: string, data: any): Promise<boolean> {
     await this.initPromise;
     if (!data) return false;
 
@@ -156,7 +199,7 @@ class UnifiedCacheManager {
       if (type === 'images') {
         if (typeof data === 'string' && data.startsWith('data:image')) {
           const base64Data = data.split(',')[1];
-          const buffer = Buffer.from(base64Data, 'base64');
+          const buffer = Buffer.from(base64Data!, 'base64');
           await fs.promises.writeFile(filePath, buffer);
         } else if (Buffer.isBuffer(data)) {
           await fs.promises.writeFile(filePath, data);
@@ -171,7 +214,7 @@ class UnifiedCacheManager {
         this.index[type] = {};
       }
 
-      this.index[type][hash] = {
+      this.index[type]![hash] = {
         key: key,
         timestamp: Date.now(),
         file: path.basename(filePath)
@@ -180,12 +223,12 @@ class UnifiedCacheManager {
       this.saveIndex();
       return true;
     } catch (error) {
-      Logger.cache.error(`Write failed for ${type}/${key}`, error);
+      Logger.cache.error(`Write failed for ${type}/${key}`, error as Error);
       return false;
     }
   }
 
-  async clearExpired() {
+  async clearExpired(): Promise<void> {
     await this.initPromise;
     const isOnline = await this.isOnline();
     if (!isOnline) return;
@@ -194,17 +237,17 @@ class UnifiedCacheManager {
     const now = Date.now();
 
     for (const type of Object.keys(this.index)) {
-      for (const hash of Object.keys(this.index[type])) {
-        const entry = this.index[type][hash];
+      for (const hash of Object.keys(this.index[type]!)) {
+        const entry = this.index[type]![hash]!;
         const age = now - entry.timestamp;
 
         if (age > this.cacheExpiry) {
           const filePath = path.join(this.cacheRoot, type, entry.file);
           try {
             await fs.promises.unlink(filePath);
-            delete this.index[type][hash];
+            delete this.index[type]![hash];
             clearedCount++;
-          } catch (error) {
+          } catch (error: any) {
             if (error.code !== 'ENOENT') {
               Logger.cache.error('Failed to delete expired cache file', error);
             }
@@ -219,8 +262,8 @@ class UnifiedCacheManager {
     }
   }
 
-  getStats() {
-    const stats = {
+  getStats(): CacheStats {
+    const stats: CacheStats = {
       types: {},
       total: 0,
       oldestEntry: null,
@@ -228,7 +271,7 @@ class UnifiedCacheManager {
     };
 
     Object.keys(this.index).forEach(type => {
-      const entries = Object.values(this.index[type]);
+      const entries = Object.values(this.index[type]!);
       stats.types[type] = entries.length;
       stats.total += entries.length;
 
@@ -245,15 +288,15 @@ class UnifiedCacheManager {
     return stats;
   }
 
-  async clearAll() {
+  async clearAll(): Promise<void> {
     await this.initPromise;
     for (const type of Object.keys(this.index)) {
-      for (const hash of Object.keys(this.index[type])) {
-        const entry = this.index[type][hash];
+      for (const hash of Object.keys(this.index[type]!)) {
+        const entry = this.index[type]![hash]!;
         const filePath = path.join(this.cacheRoot, type, entry.file);
         try {
           await fs.promises.unlink(filePath);
-        } catch (error) {
+        } catch (error: any) {
           if (error.code !== 'ENOENT') {
             Logger.cache.error('Failed to delete cache file', error);
           }
@@ -266,11 +309,11 @@ class UnifiedCacheManager {
     Logger.cache.info('Cache cleared completely');
   }
 
-  listAllEntries() {
-    const entries = [];
+  listAllEntries(): CacheListEntry[] {
+    const entries: CacheListEntry[] = [];
     Object.keys(this.index).forEach(type => {
-      Object.keys(this.index[type]).forEach(hash => {
-        const entry = this.index[type][hash];
+      Object.keys(this.index[type]!).forEach(hash => {
+        const entry = this.index[type]![hash]!;
         entries.push({
           type,
           key: entry.key,
@@ -283,12 +326,12 @@ class UnifiedCacheManager {
     return entries;
   }
 
-  async getEntrySize(type, key) {
+  async getEntrySize(type: string, key: string): Promise<number> {
     const filePath = this.getCacheFilePath(type, key);
     try {
       const stats = await fs.promises.stat(filePath);
       return stats.size;
-    } catch (error) {
+    } catch (error: any) {
       if (error.code !== 'ENOENT') {
         Logger.cache.error('Failed to get file size', error);
       }
@@ -296,20 +339,20 @@ class UnifiedCacheManager {
     }
   }
 
-  async deleteOne(type, key) {
+  async deleteOne(type: string, key: string): Promise<boolean> {
     await this.initPromise;
     const hash = this.generateHash(key);
-    if (!this.index[type] || !this.index[type][hash]) {
+    if (!this.index[type] || !this.index[type]![hash]) {
       return false;
     }
 
     const filePath = this.getCacheFilePath(type, key);
     try {
       await fs.promises.unlink(filePath);
-      delete this.index[type][hash];
+      delete this.index[type]![hash];
       await this.saveIndex();
       return true;
-    } catch (error) {
+    } catch (error: any) {
       if (error.code !== 'ENOENT') {
         Logger.cache.error('Failed to delete cache entry', error);
       }
@@ -318,4 +361,4 @@ class UnifiedCacheManager {
   }
 }
 
-module.exports = UnifiedCacheManager;
+export default UnifiedCacheManager;

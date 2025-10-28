@@ -1,9 +1,59 @@
-const crypto = require('crypto');
-const https = require('https');
-const { shell, safeStorage } = require('electron');
-const Logger = require('../utils/Logger');
+/**
+ * Spotify OAuth Authentication Manager
+ *
+ * Implements Spotify PKCE (Proof Key for Code Exchange) OAuth flow.
+ * Handles token storage with encryption, auto-refresh, and user profile.
+ */
+
+import crypto from 'crypto';
+import https from 'https';
+import fs from 'fs';
+import path from 'path';
+import { shell, safeStorage } from 'electron';
+import Logger from '../../shared/utils/Logger';
+import type Store from 'electron-store';
+
+// Spotify API response interfaces
+interface SpotifyTokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+  token_type: string;
+  scope: string;
+  error?: string;
+  error_description?: string;
+}
+
+interface SpotifyProfileResponse {
+  display_name?: string;
+  id: string;
+  email?: string;
+  images?: Array<{ url: string }>;
+  country?: string;
+  product?: string;
+}
+
+interface TokenData {
+  access_token: string;
+  refresh_token: string;
+  expires_at: number;
+}
+
+export interface UserProfile {
+  displayName: string;
+  email: string | null;
+  imageUrl: string | null;
+  country: string | null;
+  product: string | null;
+}
 
 class SpotifyAuth {
+  private store: Store | null;
+  private clientId: string | null;
+  private redirectUri: string;
+  private codeVerifier: string | null;
+  private tokenRefreshInterval: NodeJS.Timeout | null;
+
   constructor() {
     this.store = null;
     this.initStore();
@@ -15,62 +65,59 @@ class SpotifyAuth {
     this.loadConfig();
   }
 
-  async initStore() {
-    const Store = (await import('electron-store')).default;
-    this.store = new Store();
+  private async initStore(): Promise<void> {
+    const StoreModule = await import('electron-store');
+    this.store = new StoreModule.default();
   }
 
-  loadConfig() {
-    const fs = require('fs');
-    const path = require('path');
-
+  private loadConfig(): void {
     try {
+      // After bundling, __dirname is dist/main, so ../../.env gets to project root
       const envPath = path.join(__dirname, '../../.env');
+      Logger.auth.debug(`Looking for .env at: ${envPath}`);
+
       if (fs.existsSync(envPath)) {
         const envContent = fs.readFileSync(envPath, 'utf8');
         const lines = envContent.split('\n');
 
         for (const line of lines) {
           if (line.includes('=')) {
-            const [key, value] = line.split('=').map(s => s.trim());
-            if (key === 'SPOTIFY_CLIENT_ID') {
+            const [key, value] = line.split('=').map((s) => s.trim());
+            if (key === 'SPOTIFY_CLIENT_ID' && value) {
               this.clientId = value;
+              Logger.auth.info('Spotify Client ID loaded successfully');
             }
           }
         }
+      } else {
+        Logger.auth.warn(`Spotify .env file not found at: ${envPath}`);
       }
 
       if (!this.clientId) {
         Logger.auth.warn('Spotify Client ID not found in .env file');
       }
     } catch (error) {
-      Logger.auth.error('Failed to load Spotify config', error);
+      Logger.auth.error('Failed to load Spotify config', error as Error);
     }
   }
 
-  // Generate cryptographically secure random string (43-128 chars)
-  generateCodeVerifier() {
+  private generateCodeVerifier(): string {
     return crypto.randomBytes(64).toString('base64url');
   }
 
-  // Generate SHA256 hash of code verifier
-  async generateCodeChallenge(verifier) {
+  private async generateCodeChallenge(verifier: string): Promise<string> {
     const hash = crypto.createHash('sha256').update(verifier).digest();
     return hash.toString('base64url');
   }
 
-  // Build authorization URL for PKCE flow
-  async buildAuthUrl() {
+  private async buildAuthUrl(): Promise<string> {
     this.codeVerifier = this.generateCodeVerifier();
     const codeChallenge = await this.generateCodeChallenge(this.codeVerifier);
 
-    const scopes = [
-      'user-read-private',
-      'user-read-email'
-    ];
+    const scopes = ['user-read-private', 'user-read-email'];
 
     const params = new URLSearchParams({
-      client_id: this.clientId,
+      client_id: this.clientId!,
       response_type: 'code',
       redirect_uri: this.redirectUri,
       code_challenge_method: 'S256',
@@ -82,8 +129,7 @@ class SpotifyAuth {
     return `https://accounts.spotify.com/authorize?${params.toString()}`;
   }
 
-  // Open browser for user to login
-  async startAuthFlow() {
+  async startAuthFlow(): Promise<void> {
     if (!this.clientId) {
       throw new Error('Spotify Client ID not configured');
     }
@@ -93,14 +139,13 @@ class SpotifyAuth {
     await shell.openExternal(authUrl);
   }
 
-  // Exchange authorization code for access token
-  async exchangeCodeForToken(code) {
+  private async exchangeCodeForToken(code: string): Promise<SpotifyTokenResponse> {
     if (!this.codeVerifier) {
       throw new Error('Code verifier not found. Start auth flow first.');
     }
 
     const params = new URLSearchParams({
-      client_id: this.clientId,
+      client_id: this.clientId!,
       grant_type: 'authorization_code',
       code: code,
       redirect_uri: this.redirectUri,
@@ -110,12 +155,11 @@ class SpotifyAuth {
     return this.makeTokenRequest(params);
   }
 
-  // Make token request to Spotify
-  makeTokenRequest(params) {
+  private makeTokenRequest(params: URLSearchParams): Promise<SpotifyTokenResponse> {
     return new Promise((resolve, reject) => {
       const postData = params.toString();
 
-      const options = {
+      const options: https.RequestOptions = {
         hostname: 'accounts.spotify.com',
         path: '/api/token',
         method: 'POST',
@@ -134,7 +178,7 @@ class SpotifyAuth {
 
         res.on('end', () => {
           try {
-            const json = JSON.parse(data);
+            const json = JSON.parse(data) as SpotifyTokenResponse;
 
             if (json.error) {
               reject(new Error(json.error_description || json.error));
@@ -156,13 +200,13 @@ class SpotifyAuth {
     });
   }
 
-  storeTokens(accessToken, refreshToken, expiresIn) {
+  private storeTokens(accessToken: string, refreshToken: string, expiresIn: number): void {
     if (!this.store) return;
 
-    const tokenData = {
+    const tokenData: TokenData = {
       access_token: accessToken,
       refresh_token: refreshToken,
-      expires_at: Date.now() + (expiresIn * 1000)
+      expires_at: Date.now() + expiresIn * 1000
     };
 
     const encrypted = safeStorage.encryptString(JSON.stringify(tokenData));
@@ -171,32 +215,31 @@ class SpotifyAuth {
     Logger.auth.debug('Tokens stored securely');
   }
 
-  getStoredTokens() {
+  private getStoredTokens(): TokenData | null {
     if (!this.store) return null;
 
     try {
       const encryptedBase64 = this.store.get('spotify_tokens');
-      if (!encryptedBase64) {
+      if (!encryptedBase64 || typeof encryptedBase64 !== 'string') {
         return null;
       }
 
       const encrypted = Buffer.from(encryptedBase64, 'base64');
       const decrypted = safeStorage.decryptString(encrypted);
-      return JSON.parse(decrypted);
+      return JSON.parse(decrypted) as TokenData;
     } catch (error) {
-      Logger.auth.error('Failed to retrieve tokens', error);
+      Logger.auth.error('Failed to retrieve tokens', error as Error);
       return null;
     }
   }
 
-  isLoggedIn() {
+  isLoggedIn(): boolean {
     if (!this.store) return false;
     const tokens = this.getStoredTokens();
-    return tokens && tokens.refresh_token;
+    return !!(tokens && tokens.refresh_token);
   }
 
-  // Get current access token (refresh if needed)
-  async getAccessToken() {
+  async getAccessToken(): Promise<string | null> {
     const tokens = this.getStoredTokens();
 
     if (!tokens) {
@@ -213,8 +256,7 @@ class SpotifyAuth {
     return tokens.access_token;
   }
 
-  // Refresh access token using refresh token
-  async refreshAccessToken() {
+  private async refreshAccessToken(): Promise<string> {
     const tokens = this.getStoredTokens();
 
     if (!tokens || !tokens.refresh_token) {
@@ -222,7 +264,7 @@ class SpotifyAuth {
     }
 
     const params = new URLSearchParams({
-      client_id: this.clientId,
+      client_id: this.clientId!,
       grant_type: 'refresh_token',
       refresh_token: tokens.refresh_token
     });
@@ -240,13 +282,12 @@ class SpotifyAuth {
       Logger.auth.info('Token refreshed successfully');
       return response.access_token;
     } catch (error) {
-      Logger.auth.error('Token refresh failed', error);
+      Logger.auth.error('Token refresh failed', error as Error);
       throw error;
     }
   }
 
-  // Start auto-refresh interval (refresh every 55 minutes)
-  startAutoRefresh() {
+  startAutoRefresh(): void {
     if (this.tokenRefreshInterval) {
       clearInterval(this.tokenRefreshInterval);
     }
@@ -257,21 +298,20 @@ class SpotifyAuth {
         try {
           await this.refreshAccessToken();
         } catch (error) {
-          Logger.auth.error('Auto-refresh failed', error);
+          Logger.auth.error('Auto-refresh failed', error as Error);
         }
       }
     }, 55 * 60 * 1000);
   }
 
-  // Stop auto-refresh interval
-  stopAutoRefresh() {
+  stopAutoRefresh(): void {
     if (this.tokenRefreshInterval) {
       clearInterval(this.tokenRefreshInterval);
       this.tokenRefreshInterval = null;
     }
   }
 
-  logout() {
+  logout(): void {
     if (this.store) {
       this.store.delete('spotify_tokens');
     }
@@ -279,8 +319,7 @@ class SpotifyAuth {
     Logger.auth.info('User logged out');
   }
 
-  // Handle OAuth callback
-  async handleCallback(callbackUrl) {
+  async handleCallback(callbackUrl: string): Promise<boolean> {
     try {
       const url = new URL(callbackUrl);
       const code = url.searchParams.get('code');
@@ -298,11 +337,7 @@ class SpotifyAuth {
       const response = await this.exchangeCodeForToken(code);
 
       // Store tokens securely
-      this.storeTokens(
-        response.access_token,
-        response.refresh_token,
-        response.expires_in
-      );
+      this.storeTokens(response.access_token, response.refresh_token!, response.expires_in);
 
       // Start auto-refresh
       this.startAutoRefresh();
@@ -310,26 +345,25 @@ class SpotifyAuth {
       Logger.auth.info('User logged in successfully');
       return true;
     } catch (error) {
-      Logger.auth.error('OAuth callback failed', error);
+      Logger.auth.error('OAuth callback failed', error as Error);
       throw error;
     }
   }
 
-  // Get user profile from Spotify API
-  async getUserProfile() {
+  async getUserProfile(): Promise<UserProfile | null> {
     const accessToken = await this.getAccessToken();
 
     if (!accessToken) {
       return null;
     }
 
-    return new Promise((resolve, reject) => {
-      const options = {
+    return new Promise((resolve) => {
+      const options: https.RequestOptions = {
         hostname: 'api.spotify.com',
         path: '/v1/me',
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${accessToken}`
+          Authorization: `Bearer ${accessToken}`
         }
       };
 
@@ -343,11 +377,14 @@ class SpotifyAuth {
         res.on('end', () => {
           try {
             if (res.statusCode === 200) {
-              const profile = JSON.parse(data);
+              const profile = JSON.parse(data) as SpotifyProfileResponse;
               resolve({
                 displayName: profile.display_name || profile.id,
                 email: profile.email || null,
-                imageUrl: profile.images && profile.images.length > 0 ? profile.images[0].url : null,
+                imageUrl:
+                  profile.images && profile.images.length > 0 && profile.images[0]
+                    ? profile.images[0].url
+                    : null,
                 country: profile.country || null,
                 product: profile.product || null
               });
@@ -356,7 +393,7 @@ class SpotifyAuth {
               resolve(null);
             }
           } catch (error) {
-            Logger.auth.error('Failed to parse user profile', error);
+            Logger.auth.error('Failed to parse user profile', error as Error);
             resolve(null);
           }
         });
@@ -372,4 +409,4 @@ class SpotifyAuth {
   }
 }
 
-module.exports = SpotifyAuth;
+export default SpotifyAuth;

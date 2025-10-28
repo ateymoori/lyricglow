@@ -1,29 +1,173 @@
+/**
+ * Renderer Process
+ *
+ * Main UI logic for the LyricGlow application.
+ * Handles music display, lyrics synchronization, metadata, and settings.
+ */
+
+// Type definitions
+export {}; // Make this file a module
+interface MusicData {
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  position: number;
+  isPlaying: boolean;
+  nowPlayingAvailable: boolean;
+  artworkUrl?: string;
+  spotifyUrl?: string;
+  popularity?: number;
+  trackNumber?: number;
+  discNumber?: number;
+  year?: string;
+  genre?: string;
+  rating?: number;
+  playCount?: number;
+  bpm?: number;
+  trackCount?: number;
+  discCount?: number;
+}
+
+interface LyricsData {
+  synced: string | null;
+  plain: string | null;
+  instrumental: boolean;
+}
+
+interface LyricLine {
+  time: number;
+  text: string;
+}
+
+interface SyncData {
+  currentLine: LyricLine;
+  prevLine: LyricLine | null;
+  nextLine: LyricLine | null;
+  currentIndex: number;
+  totalLines: number;
+  isRTL: boolean;
+  position: number;
+}
+
+interface WordState {
+  glowing: boolean;
+  intensity: number;
+}
+
+interface MetadataArtist {
+  name?: string;
+  alternateName?: string;
+  country?: string;
+  bornYear?: string;
+  formedYear?: string;
+  diedYear?: string;
+  genre?: string;
+  website?: string;
+  facebook?: string;
+  twitter?: string;
+  listeners?: string;
+  playcount?: string;
+  tags?: string[];
+  bio?: {
+    summary: string;
+    content: string;
+  };
+  similar?: Array<{ name: string; url: string }>;
+  url?: string;
+  allImages?: string[];
+}
+
+interface MetadataTrack {
+  playcount?: string;
+}
+
+interface Metadata {
+  artist: MetadataArtist;
+  track?: MetadataTrack;
+  topTracks?: Array<{
+    name: string;
+    playcount: string | number;
+    image: string | null;
+    artist: string;
+    url?: string;
+  }>;
+  topAlbums?: Array<{
+    name: string;
+    playcount: string;
+    image: string | null;
+    artist: string;
+    url: string;
+  }>;
+  hasSpotifyData?: boolean;
+}
+
+// Extend global Window type to include musicAPI
+declare global {
+  interface Window {
+    musicAPI: {
+      onUpdate: (callback: (payload: MusicData) => void) => void;
+      onLyricsUpdate: (callback: (payload: LyricsData) => void) => void;
+      onMetadataUpdate: (callback: (payload: Metadata) => void) => void;
+      updateTrayLyrics: (text: string) => void;
+      quit: () => void;
+      openExternal: (url: string) => void;
+      cacheImage: (url: string) => Promise<string | null>;
+      seek: (position: number) => void;
+      playPause: () => void;
+      nextTrack: () => void;
+      previousTrack: () => void;
+      spotifyIsLoggedIn: () => Promise<boolean>;
+      spotifyGetUserProfile: () => Promise<any>;
+      spotifyLogin: () => void;
+      spotifyLogout: () => void;
+      onSpotifyLoggedIn: (callback: () => void) => void;
+      onSpotifyLoggedOut: (callback: () => void) => void;
+      onSpotifyLoginError: (callback: (error: string) => void) => void;
+      cacheList: () => Promise<any[]>;
+      cacheDelete: (type: string, key: string) => Promise<boolean>;
+      cacheClearAll: () => Promise<boolean>;
+      visibilityGet: (key?: string) => Promise<any>;
+      visibilitySet: (key: string, value: boolean) => Promise<boolean>;
+      visibilityReset: () => Promise<boolean>;
+      getLaunchAtLogin: () => Promise<boolean>;
+      setLaunchAtLogin: (enabled: boolean) => Promise<boolean>;
+      getTrayLyrics: () => Promise<boolean>;
+      setTrayLyrics: (enabled: boolean) => Promise<boolean>;
+      onOpenSettings: (callback: () => void) => void;
+      logsGetStats: () => Promise<any>;
+      logsOpenFolder: () => Promise<boolean>;
+      logsClear: () => Promise<boolean>;
+    };
+  }
+}
+
 const elements = {
-  title: document.getElementById('title'),
-  artist: document.getElementById('artist'),
-  album: document.getElementById('album'),
-  albumArt: document.getElementById('albumArt'),
-  progressBar: document.getElementById('progressBar'),
-  currentTime: document.getElementById('currentTime'),
-  duration: document.getElementById('duration'),
-  playPauseBtn: document.getElementById('playPauseBtn'),
-  previousBtn: document.getElementById('previousBtn'),
-  nextBtn: document.getElementById('nextBtn'),
-  closeBtn: document.getElementById('closeBtn'),
-  year: document.getElementById('year'),
-  genre: document.getElementById('genre'),
-  bpm: document.getElementById('bpm'),
-  playCount: document.getElementById('playCount'),
-  rating: document.getElementById('rating')
+  title: document.getElementById('title') as HTMLElement,
+  artist: document.getElementById('artist') as HTMLElement,
+  album: document.getElementById('album') as HTMLElement,
+  albumArt: document.getElementById('albumArt') as HTMLImageElement,
+  progressBar: document.getElementById('progressBar') as HTMLElement,
+  currentTime: document.getElementById('currentTime') as HTMLElement,
+  duration: document.getElementById('duration') as HTMLElement,
+  playPauseBtn: document.getElementById('playPauseBtn') as HTMLElement,
+  previousBtn: document.getElementById('previousBtn') as HTMLElement,
+  nextBtn: document.getElementById('nextBtn') as HTMLElement,
+  closeBtn: document.getElementById('closeBtn') as HTMLElement,
+  year: document.getElementById('year') as HTMLElement,
+  genre: document.getElementById('genre') as HTMLElement,
+  bpm: document.getElementById('bpm') as HTMLElement,
+  playCount: document.getElementById('playCount') as HTMLElement,
+  rating: document.getElementById('rating') as HTMLElement
 };
 
 // Progress bar seeking functionality
 let isDragging = false;
-let progressBarContainer = null;
-let pendingSeekPosition = null;
+let progressBarContainer: HTMLElement | null = null;
+let pendingSeekPosition: number | null = null;
 
-function updateSeekUI(e) {
-  if (!currentMusicData || !currentMusicData.duration) return;
+function updateSeekUI(e: MouseEvent): void {
+  if (!currentMusicData || !currentMusicData.duration || !progressBarContainer) return;
 
   const rect = progressBarContainer.getBoundingClientRect();
   const clickX = e.clientX - rect.left;
@@ -38,14 +182,14 @@ function updateSeekUI(e) {
   elements.currentTime.textContent = formatTime(newPosition);
 }
 
-function commitSeek() {
+function commitSeek(): void {
   if (pendingSeekPosition !== null) {
     window.musicAPI.seek(pendingSeekPosition);
     pendingSeekPosition = null;
   }
 }
 
-function initProgressBarSeek() {
+function initProgressBarSeek(): void {
   progressBarContainer = document.querySelector('.progress-bar');
 
   if (!progressBarContainer) return;
@@ -75,9 +219,9 @@ function initProgressBarSeek() {
   });
 }
 
-function updatePlayPauseButton(isPlaying) {
-  const playIcon = elements.playPauseBtn.querySelector('.play-icon');
-  const pauseIcon = elements.playPauseBtn.querySelector('.pause-icon');
+function updatePlayPauseButton(isPlaying: boolean): void {
+  const playIcon = elements.playPauseBtn.querySelector('.play-icon') as HTMLElement;
+  const pauseIcon = elements.playPauseBtn.querySelector('.pause-icon') as HTMLElement;
 
   if (isPlaying) {
     playIcon.style.display = 'none';
@@ -101,6 +245,17 @@ function updatePlayPauseButton(isPlaying) {
  * - Pure consumers: Display components are stateless UI renderers
  */
 class LyricsSyncManager {
+  lyrics: LyricLine[];
+  currentIndex: number;
+  currentPosition: number;
+  isRTL: boolean;
+  state: 'empty' | 'loading' | 'unavailable' | 'instrumental' | 'ready';
+  mainDisplay: LyricsMainDisplay | null;
+  modalDisplay: FullLyricsModalDisplay | null;
+  lastTrayUpdate: number;
+  lastTrayText: string;
+  trayUpdateInterval: number;
+
   constructor() {
     // Single source of truth for lyrics state
     this.lyrics = [];
@@ -123,16 +278,19 @@ class LyricsSyncManager {
    * Parse LRC format into structured lyrics array
    * Format: [MM:SS.CS]Text
    */
-  parseLRC(content) {
+  parseLRC(content: string): LyricLine[] {
     if (!content) return [];
 
     const lines = content.split('\n');
-    const lyrics = [];
+    const lyrics: LyricLine[] = [];
 
     for (const line of lines) {
       const match = line.match(/^\[(\d{2}):(\d{2})\.(\d{2})\](.*)$/);
-      if (match) {
-        const [, minutes, seconds, centiseconds, text] = match;
+      if (match && match[1] && match[2] && match[3] && match[4] !== undefined) {
+        const minutes = match[1];
+        const seconds = match[2];
+        const centiseconds = match[3];
+        const text = match[4];
         const time = parseInt(minutes) * 60 + parseInt(seconds) + parseInt(centiseconds) / 100;
         lyrics.push({ time, text: text.trim() });
       }
@@ -144,7 +302,7 @@ class LyricsSyncManager {
   /**
    * Set lyrics from IPC event (single entry point)
    */
-  setLyrics(lyricsData) {
+  setLyrics(lyricsData: LyricsData | null): void {
     // Handle unavailable lyrics
     if (!lyricsData || !lyricsData.synced) {
       this.clear();
@@ -167,7 +325,7 @@ class LyricsSyncManager {
     this.state = 'ready';
 
     // Detect text direction once for all displays
-    if (this.lyrics.length > 0) {
+    if (this.lyrics.length > 0 && this.lyrics[0]) {
       this.isRTL = this.detectRTL(this.lyrics[0].text);
     }
 
@@ -179,7 +337,7 @@ class LyricsSyncManager {
    * Update playback position and trigger sync if line changed
    * Called from animation loop (60 FPS)
    */
-  updatePosition(position) {
+  updatePosition(position: number): void {
     if (this.state !== 'ready' || !this.lyrics.length) return;
 
     this.currentPosition = position;
@@ -195,15 +353,17 @@ class LyricsSyncManager {
   /**
    * Find current lyric line index based on position
    */
-  findCurrentIndex(position) {
+  findCurrentIndex(position: number): number {
     if (!this.lyrics.length) return -1;
 
     // Show first line if before first timestamp
-    if (position < this.lyrics[0].time) return 0;
+    const firstLine = this.lyrics[0];
+    if (firstLine && position < firstLine.time) return 0;
 
     // Find the last line whose timestamp has passed
     for (let i = this.lyrics.length - 1; i >= 0; i--) {
-      if (position >= this.lyrics[i].time) return i;
+      const line = this.lyrics[i];
+      if (line && position >= line.time) return i;
     }
 
     return 0;
@@ -213,16 +373,18 @@ class LyricsSyncManager {
    * ATOMIC BROADCAST: Update all three displays simultaneously
    * This is the core synchronization mechanism
    */
-  broadcast() {
+  broadcast(): void {
     if (this.state !== 'ready' || this.currentIndex < 0) return;
 
     const currentLine = this.lyrics[this.currentIndex];
-    const prevLine = this.currentIndex > 0 ? this.lyrics[this.currentIndex - 1] : null;
-    const nextLine = this.currentIndex < this.lyrics.length - 1 ?
-                     this.lyrics[this.currentIndex + 1] : null;
+    if (!currentLine) return; // Guard against undefined
+
+    const prevLine = this.currentIndex > 0 ? (this.lyrics[this.currentIndex - 1] || null) : null;
+    const nextLine =
+      this.currentIndex < this.lyrics.length - 1 ? (this.lyrics[this.currentIndex + 1] || null) : null;
 
     // Prepare sync data payload
-    const syncData = {
+    const syncData: SyncData = {
       currentLine,
       prevLine,
       nextLine,
@@ -249,7 +411,7 @@ class LyricsSyncManager {
   /**
    * Broadcast state changes (loading, unavailable, instrumental)
    */
-  broadcastState() {
+  broadcastState(): void {
     if (this.mainDisplay) {
       this.mainDisplay.setState(this.state);
     }
@@ -267,7 +429,7 @@ class LyricsSyncManager {
   /**
    * Update system tray with throttling (100ms) to prevent excessive IPC
    */
-  updateTray(text) {
+  updateTray(text: string): void {
     const now = Date.now();
 
     // Throttle: only update every 100ms
@@ -286,7 +448,7 @@ class LyricsSyncManager {
   /**
    * Detect RTL languages (Arabic, Persian, Hebrew)
    */
-  detectRTL(text) {
+  detectRTL(text: string): boolean {
     const rtlChars = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
     return rtlChars.test(text);
   }
@@ -294,7 +456,7 @@ class LyricsSyncManager {
   /**
    * Show loading state
    */
-  showLoading() {
+  showLoading(): void {
     this.clear();
     this.state = 'loading';
     this.broadcastState();
@@ -303,7 +465,7 @@ class LyricsSyncManager {
   /**
    * Clear all lyrics state
    */
-  clear() {
+  clear(): void {
     this.lyrics = [];
     this.currentIndex = -1;
     this.currentPosition = 0;
@@ -324,9 +486,27 @@ class LyricsSyncManager {
  * Does NOT manage state - receives all data from LyricsSyncManager
  */
 class LyricsMainDisplay {
+  container: HTMLElement | null;
+  elements: {
+    previous: HTMLElement | null;
+    current: HTMLElement | null;
+    next: HTMLElement | null;
+    currentText: HTMLElement | null;
+  };
+  cachedWords: HTMLElement[];
+  wordStates: WordState[];
+  lastGlowUpdate: number;
+  glowUpdateInterval: number;
+  currentSyncData: SyncData | null;
+
   constructor() {
     this.container = null;
-    this.elements = {};
+    this.elements = {
+      previous: null,
+      current: null,
+      next: null,
+      currentText: null
+    };
 
     // Word glow state (managed per current line)
     this.cachedWords = [];
@@ -338,7 +518,7 @@ class LyricsMainDisplay {
     this.currentSyncData = null;
   }
 
-  init() {
+  init(): void {
     this.container = document.getElementById('lyricsContainer');
     this.elements = {
       previous: document.getElementById('lyricsPrevious'),
@@ -352,12 +532,16 @@ class LyricsMainDisplay {
    * Render 3-line display from sync data (pure function)
    * Called by LyricsSyncManager when line changes
    */
-  render(syncData) {
+  render(syncData: SyncData): void {
     this.currentSyncData = syncData;
 
     // Update previous and next lines
-    this.elements.previous.textContent = syncData.prevLine?.text || '';
-    this.elements.next.textContent = syncData.nextLine?.text || '';
+    if (this.elements.previous) {
+      this.elements.previous.textContent = syncData.prevLine?.text || '';
+    }
+    if (this.elements.next) {
+      this.elements.next.textContent = syncData.nextLine?.text || '';
+    }
 
     // Update current line with word spans
     this.setCurrentLine(syncData.currentLine.text, syncData.isRTL);
@@ -366,8 +550,10 @@ class LyricsMainDisplay {
   /**
    * Create word spans for current line
    */
-  setCurrentLine(text, isRTL) {
-    const words = text.split(' ').filter(w => w.length > 0);
+  setCurrentLine(text: string, isRTL: boolean): void {
+    if (!this.elements.currentText) return;
+
+    const words = text.split(' ').filter((w) => w.length > 0);
 
     // Clear and rebuild
     this.elements.currentText.innerHTML = '';
@@ -380,14 +566,14 @@ class LyricsMainDisplay {
       const span = document.createElement('span');
       span.className = 'lyrics-word';
       span.textContent = word;
-      this.elements.currentText.appendChild(span);
+      this.elements.currentText!.appendChild(span);
 
       this.cachedWords.push(span);
       this.wordStates.push({ glowing: false, intensity: 0 });
 
       // Add space between words
       if (index < words.length - 1) {
-        this.elements.currentText.appendChild(document.createTextNode(' '));
+        this.elements.currentText!.appendChild(document.createTextNode(' '));
       }
     });
   }
@@ -396,7 +582,7 @@ class LyricsMainDisplay {
    * Update word glow effect (called from animation loop at 60 FPS)
    * Throttled internally to 30 FPS for performance
    */
-  updateGlow(position) {
+  updateGlow(position: number): void {
     if (!this.currentSyncData || !this.currentSyncData.nextLine) return;
 
     // Throttle to 30 FPS
@@ -415,7 +601,7 @@ class LyricsMainDisplay {
   /**
    * Apply glow effect to words based on progress (0 to 1)
    */
-  applyWordGlow(progress) {
+  applyWordGlow(progress: number): void {
     if (!this.cachedWords.length) return;
 
     const totalWords = this.cachedWords.length;
@@ -426,20 +612,21 @@ class LyricsMainDisplay {
       const shouldGlow = wordProgress > 0;
 
       // Fade in effect: 0-0.5 = fade, 0.5-1.0 = full glow
-      const newIntensity = shouldGlow ?
-        (wordProgress > 0.5 ? 1 : wordProgress * 2) : 0;
+      const newIntensity = shouldGlow ? (wordProgress > 0.5 ? 1 : wordProgress * 2) : 0;
 
       const state = this.wordStates[index];
+      if (!state) return; // Skip if state doesn't exist
 
       // Only update DOM if state changed (performance)
-      if (shouldGlow !== state.glowing ||
-          Math.abs(newIntensity - state.intensity) > 0.01) {
-
+      if (
+        shouldGlow !== state.glowing ||
+        Math.abs(newIntensity - state.intensity) > 0.01
+      ) {
         state.glowing = shouldGlow;
         state.intensity = newIntensity;
 
         if (shouldGlow) {
-          word.style.setProperty('--glow-intensity', newIntensity);
+          word.style.setProperty('--glow-intensity', String(newIntensity));
           word.classList.add('glowing');
         } else {
           word.classList.remove('glowing');
@@ -452,7 +639,9 @@ class LyricsMainDisplay {
   /**
    * Set display state (loading, unavailable, instrumental, ready)
    */
-  setState(state) {
+  setState(state: string): void {
+    if (!this.container) return;
+
     if (state === 'ready') {
       this.container.removeAttribute('data-state');
     } else {
@@ -464,10 +653,10 @@ class LyricsMainDisplay {
   /**
    * Clear display
    */
-  clear() {
-    this.elements.previous.textContent = '';
-    this.elements.currentText.innerHTML = '';
-    this.elements.next.textContent = '';
+  clear(): void {
+    if (this.elements.previous) this.elements.previous.textContent = '';
+    if (this.elements.currentText) this.elements.currentText.innerHTML = '';
+    if (this.elements.next) this.elements.next.textContent = '';
     this.cachedWords = [];
     this.wordStates = [];
     this.currentSyncData = null;
@@ -486,15 +675,31 @@ class LyricsMainDisplay {
  * Does NOT manage state - receives all data from LyricsSyncManager
  */
 class FullLyricsModalDisplay {
-  constructor(syncManager) {
+  syncManager: LyricsSyncManager;
+  modal: HTMLElement | null;
+  elements: {
+    body: HTMLElement | null;
+    text: HTMLElement | null;
+    closeBtn: HTMLElement | null;
+    openBtn: HTMLElement | null;
+  };
+  isOpen: boolean;
+  autoScrollEnabled: boolean;
+
+  constructor(syncManager: LyricsSyncManager) {
     this.syncManager = syncManager;
     this.modal = null;
-    this.elements = {};
+    this.elements = {
+      body: null,
+      text: null,
+      closeBtn: null,
+      openBtn: null
+    };
     this.isOpen = false;
     this.autoScrollEnabled = true;
   }
 
-  init() {
+  init(): void {
     this.modal = document.getElementById('fullLyricsModal');
     this.elements = {
       body: document.getElementById('fullLyricsBody'),
@@ -504,14 +709,18 @@ class FullLyricsModalDisplay {
     };
 
     // Event listeners
-    this.elements.openBtn.addEventListener('click', () => {
-      this.show();
-    });
+    if (this.elements.openBtn) {
+      this.elements.openBtn.addEventListener('click', () => {
+        this.show();
+      });
+    }
 
-    this.elements.closeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.hide();
-    });
+    if (this.elements.closeBtn) {
+      this.elements.closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.hide();
+      });
+    }
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.isOpen) {
@@ -520,21 +729,23 @@ class FullLyricsModalDisplay {
     });
 
     // Disable auto-scroll on user interaction
-    this.elements.body.addEventListener('scroll', () => {
-      this.autoScrollEnabled = false;
-    });
+    if (this.elements.body) {
+      this.elements.body.addEventListener('scroll', () => {
+        this.autoScrollEnabled = false;
+      });
 
-    this.elements.body.addEventListener('click', () => {
-      this.autoScrollEnabled = false;
-    });
+      this.elements.body.addEventListener('click', () => {
+        this.autoScrollEnabled = false;
+      });
 
-    this.elements.body.addEventListener('wheel', () => {
-      this.autoScrollEnabled = false;
-    });
+      this.elements.body.addEventListener('wheel', () => {
+        this.autoScrollEnabled = false;
+      });
+    }
   }
 
-  show() {
-    if (!currentMusicData || !currentMusicData.title) {
+  show(): void {
+    if (!currentMusicData || !currentMusicData.title || !this.modal) {
       return;
     }
 
@@ -546,7 +757,8 @@ class FullLyricsModalDisplay {
     setTimeout(() => this.scrollToCurrentLine(), 100);
   }
 
-  hide() {
+  hide(): void {
+    if (!this.modal) return;
     this.modal.style.display = 'none';
     this.isOpen = false;
   }
@@ -554,12 +766,14 @@ class FullLyricsModalDisplay {
   /**
    * Refresh entire lyrics list (called when lyrics change)
    */
-  refresh() {
+  refresh(): void {
     if (!this.isOpen) return;
 
     this.updateLyrics();
     this.autoScrollEnabled = true;
-    this.elements.body.scrollTop = 0;
+    if (this.elements.body) {
+      this.elements.body.scrollTop = 0;
+    }
 
     setTimeout(() => this.scrollToCurrentLine(), 100);
   }
@@ -567,46 +781,49 @@ class FullLyricsModalDisplay {
   /**
    * Rebuild full lyrics list from sync manager
    */
-  updateLyrics() {
+  updateLyrics(): void {
+    const textEl = this.elements.text;
+    if (!textEl) return;
+
     const state = this.syncManager.state;
     const lyrics = this.syncManager.lyrics;
 
     // Handle special states
     if (state === 'loading') {
-      this.elements.text.setAttribute('data-state', 'loading');
-      this.elements.text.textContent = 'Loading lyrics...';
+      textEl.setAttribute('data-state', 'loading');
+      textEl.textContent = 'Loading lyrics...';
       return;
     }
 
     if (state === 'unavailable') {
-      this.elements.text.setAttribute('data-state', 'unavailable');
-      this.elements.text.textContent = 'No lyrics available';
+      textEl.setAttribute('data-state', 'unavailable');
+      textEl.textContent = 'No lyrics available';
       return;
     }
 
     if (state === 'instrumental') {
-      this.elements.text.setAttribute('data-state', 'instrumental');
-      this.elements.text.textContent = '♪ Instrumental ♪';
+      textEl.setAttribute('data-state', 'instrumental');
+      textEl.textContent = '♪ Instrumental ♪';
       return;
     }
 
     if (state !== 'ready' || !lyrics.length) {
-      this.elements.text.setAttribute('data-state', 'unavailable');
-      this.elements.text.textContent = 'No lyrics available';
+      textEl.setAttribute('data-state', 'unavailable');
+      textEl.textContent = 'No lyrics available';
       return;
     }
 
     // Render all lyrics
-    this.elements.text.removeAttribute('data-state');
-    this.elements.text.innerHTML = '';
-    this.elements.text.style.direction = this.syncManager.isRTL ? 'rtl' : 'ltr';
+    textEl.removeAttribute('data-state');
+    textEl.innerHTML = '';
+    textEl.style.direction = this.syncManager.isRTL ? 'rtl' : 'ltr';
 
     lyrics.forEach((line, index) => {
       const lineEl = document.createElement('div');
       lineEl.className = 'lyrics-line';
       lineEl.textContent = line.text || ' ';
-      lineEl.dataset.index = index;
-      lineEl.dataset.time = line.time;
+      lineEl.dataset.index = String(index);
+      lineEl.dataset.time = String(line.time);
 
       if (index === this.syncManager.currentIndex) {
         lineEl.classList.add('current');
@@ -616,15 +833,15 @@ class FullLyricsModalDisplay {
         lineEl.classList.add('empty');
       }
 
-      this.elements.text.appendChild(lineEl);
+      textEl.appendChild(lineEl);
     });
   }
 
   /**
    * Update current line highlight (called by LyricsSyncManager on broadcast)
    */
-  updateCurrent(syncData) {
-    if (!this.isOpen) return;
+  updateCurrent(syncData: SyncData): void {
+    if (!this.isOpen || !this.elements.text) return;
 
     const lines = this.elements.text.querySelectorAll('.lyrics-line');
     lines.forEach((line, index) => {
@@ -641,8 +858,8 @@ class FullLyricsModalDisplay {
   /**
    * Scroll to current line if auto-scroll enabled
    */
-  scrollToCurrentLine() {
-    if (!this.autoScrollEnabled) return;
+  scrollToCurrentLine(): void {
+    if (!this.autoScrollEnabled || !this.elements.text) return;
 
     const currentLine = this.elements.text.querySelector('.lyrics-line.current');
     if (currentLine) {
@@ -656,7 +873,7 @@ class FullLyricsModalDisplay {
   /**
    * Set state for modal display
    */
-  setState(state) {
+  setState(_state: string): void {
     // State is already handled in updateLyrics()
     // This is called for consistency with LyricsMainDisplay
   }
@@ -676,8 +893,8 @@ lyricsSyncManager.modalDisplay = fullLyricsModalDisplay;
 
 // ═══════════════════════════════════════════════════════════════════
 
-let currentMusicData = null;
-let previousTrackKey = null;
+let currentMusicData: MusicData | null = null;
+let previousTrackKey: string | null = null;
 
 let internalPosition = 0;
 let internalIsPlaying = false;
@@ -685,7 +902,7 @@ let lastSyncTime = Date.now();
 let internalAnimationRunning = false;
 let isTrackChanging = false;
 
-function startInternalTimer() {
+function startInternalTimer(): void {
   if (internalAnimationRunning) return;
   internalAnimationRunning = true;
   updateInternalPosition();
@@ -700,7 +917,7 @@ function startInternalTimer() {
  * - Lyrics sync (atomic update via LyricsSyncManager)
  * - Word glow effect (high FPS for smoothness)
  */
-function updateInternalPosition() {
+function updateInternalPosition(): void {
   if (internalIsPlaying && currentMusicData && currentMusicData.duration) {
     const now = Date.now();
     const elapsed = (now - lastSyncTime) / 1000;
@@ -727,20 +944,20 @@ function updateInternalPosition() {
   requestAnimationFrame(updateInternalPosition);
 }
 
-function formatTime(seconds) {
+function formatTime(seconds: number): string {
   if (!seconds || seconds < 0) return '0:00';
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function formatRating(rating) {
+function formatRating(rating: number): string {
   if (!rating || rating === 0) return '';
   const stars = Math.round(rating / 20);
   return '★'.repeat(stars) + '☆'.repeat(5 - stars);
 }
 
-function updateDisplay(data) {
+function updateDisplay(data: MusicData | null): void {
   currentMusicData = data;
 
   if (!data || !data.nowPlayingAvailable) {
@@ -787,7 +1004,7 @@ function updateDisplay(data) {
     elements.albumArt.classList.add('show');
     if (data.spotifyUrl) {
       elements.albumArt.title = 'Open in Spotify';
-      elements.albumArt.onclick = () => window.musicAPI.openExternal(data.spotifyUrl);
+      elements.albumArt.onclick = () => window.musicAPI.openExternal(data.spotifyUrl!);
     }
   } else {
     elements.albumArt.classList.remove('show');
@@ -817,12 +1034,12 @@ function updateDisplay(data) {
   updateDetails(data);
 }
 
-function updateDetails(data) {
+function updateDetails(data: MusicData): void {
   elements.year.textContent = data.year && data.year !== '0' ? `Year: ${data.year}` : '';
   elements.genre.textContent = data.genre ? `Genre: ${data.genre}` : '';
-  elements.bpm.textContent = data.bpm && data.bpm !== '0' ? `${data.bpm} BPM` : '';
+  elements.bpm.textContent = data.bpm && data.bpm !== 0 ? `${data.bpm} BPM` : '';
 
-  if (data.playCount && data.playCount !== '0') {
+  if (data.playCount && data.playCount !== 0) {
     elements.playCount.textContent = `Played: ${data.playCount} times`;
   } else {
     elements.playCount.textContent = '';
@@ -836,10 +1053,17 @@ function updateDetails(data) {
   }
 }
 
-function clearDetails() {
-  Object.values(elements).forEach(el => {
-    if (el && el.id && (el.id === 'year' || el.id === 'genre' ||
-        el.id === 'bpm' || el.id === 'playCount' || el.id === 'rating')) {
+function clearDetails(): void {
+  Object.values(elements).forEach((el) => {
+    if (
+      el &&
+      el.id &&
+      (el.id === 'year' ||
+        el.id === 'genre' ||
+        el.id === 'bpm' ||
+        el.id === 'playCount' ||
+        el.id === 'rating')
+    ) {
       el.textContent = '';
     }
   });
@@ -851,7 +1075,7 @@ window.musicAPI.onUpdate(updateDisplay);
  * Lyrics IPC handler: Single entry point for lyrics updates
  * Coordinates updates to all three displays atomically
  */
-window.musicAPI.onLyricsUpdate((lyricsData) => {
+window.musicAPI.onLyricsUpdate((lyricsData: LyricsData | null) => {
   if (lyricsData === null) {
     // Show loading state if not during track change
     if (!isTrackChanging) {
@@ -879,6 +1103,12 @@ window.musicAPI.onLyricsUpdate((lyricsData) => {
 });
 
 class MetadataHandler {
+  bioExpanded: boolean;
+  fullBio: string;
+  currentImageIndex: number;
+  artistImages: string[];
+  elements: any;
+
   constructor() {
     this.bioExpanded = false;
     this.fullBio = '';
@@ -886,7 +1116,7 @@ class MetadataHandler {
     this.artistImages = [];
   }
 
-  init() {
+  init(): void {
     this.elements = {
       container: document.getElementById('metadataContainer'),
       artistInfo: document.getElementById('artistInfo'),
@@ -935,17 +1165,17 @@ class MetadataHandler {
       this.navigateCarousel(1);
     });
 
-    this.elements.modalClose.addEventListener('click', (e) => {
+    this.elements.modalClose.addEventListener('click', (e: Event) => {
       e.stopPropagation();
       this.closeModal();
     });
 
-    this.elements.modalDownload.addEventListener('click', (e) => {
+    this.elements.modalDownload.addEventListener('click', (e: Event) => {
       e.stopPropagation();
       this.downloadImage();
     });
 
-    this.elements.imageModal.addEventListener('click', (e) => {
+    this.elements.imageModal.addEventListener('click', (e: MouseEvent) => {
       if (e.target === this.elements.imageModal) {
         this.closeModal();
       }
@@ -958,7 +1188,7 @@ class MetadataHandler {
     });
   }
 
-  update(metadata) {
+  update(metadata: Metadata | null): void {
     if (!metadata) {
       this.clear();
       return;
@@ -1033,7 +1263,11 @@ class MetadataHandler {
         this.elements.artistWebsite.style.display = 'none';
       }
 
-      if (metadata.artist.facebook && metadata.artist.facebook.trim() !== '' && metadata.artist.facebook !== '1') {
+      if (
+        metadata.artist.facebook &&
+        metadata.artist.facebook.trim() !== '' &&
+        metadata.artist.facebook !== '1'
+      ) {
         const fbUrl = metadata.artist.facebook.startsWith('http')
           ? metadata.artist.facebook
           : 'https://facebook.com/' + metadata.artist.facebook;
@@ -1045,7 +1279,11 @@ class MetadataHandler {
         this.elements.artistFacebook.style.display = 'none';
       }
 
-      if (metadata.artist.twitter && metadata.artist.twitter.trim() !== '' && metadata.artist.twitter !== '1') {
+      if (
+        metadata.artist.twitter &&
+        metadata.artist.twitter.trim() !== '' &&
+        metadata.artist.twitter !== '1'
+      ) {
         const twUrl = metadata.artist.twitter.startsWith('http')
           ? metadata.artist.twitter
           : 'https://twitter.com/' + metadata.artist.twitter;
@@ -1080,7 +1318,7 @@ class MetadataHandler {
       // Update tags
       if (metadata.artist.tags && metadata.artist.tags.length > 0) {
         this.elements.tags.innerHTML = '';
-        metadata.artist.tags.forEach(tag => {
+        metadata.artist.tags.forEach((tag) => {
           const tagEl = document.createElement('span');
           tagEl.className = 'tag-pill';
           tagEl.textContent = tag;
@@ -1118,7 +1356,7 @@ class MetadataHandler {
           artistEl.onclick = () => window.musicAPI.openExternal(artist.url);
           this.elements.similarArtists.appendChild(artistEl);
 
-          if (index < metadata.artist.similar.length - 1) {
+          if (index < metadata.artist.similar!.length - 1) {
             const separator = document.createTextNode(', ');
             this.elements.similarArtists.appendChild(separator);
           }
@@ -1163,12 +1401,12 @@ class MetadataHandler {
     }
   }
 
-  async updateArtistImages(images) {
+  async updateArtistImages(images: string[]): Promise<void> {
     this.artistImages = [];
     this.currentImageIndex = 0;
     this.elements.carouselTrack.innerHTML = '';
 
-    const validImages = images.filter(img => img);
+    const validImages = images.filter((img) => img);
 
     if (validImages.length === 0) {
       this.elements.artistImagesCarousel.style.display = 'none';
@@ -1176,13 +1414,11 @@ class MetadataHandler {
     }
 
     // Cache all images and filter out failed ones
-    const imageResults = await Promise.all(
-      validImages.map(url => window.musicAPI.cacheImage(url))
-    );
+    const imageResults = await Promise.all(validImages.map((url) => window.musicAPI.cacheImage(url)));
 
     const cachedImages = validImages
       .map((url, i) => ({ url, cached: imageResults[i] }))
-      .filter(item => item.cached);
+      .filter((item): item is { url: string; cached: string } => item.cached !== null);
 
     // Only proceed if we have valid cached images
     if (cachedImages.length === 0) {
@@ -1210,7 +1446,15 @@ class MetadataHandler {
     this.updateCarouselPosition();
   }
 
-  async updateTopTracks(tracks) {
+  async updateTopTracks(
+    tracks: Array<{
+      name: string;
+      playcount: string | number;
+      image: string | null;
+      artist: string;
+      url?: string;
+    }>
+  ): Promise<void> {
     if (tracks.length > 0) {
       this.elements.topTracksList.innerHTML = '';
 
@@ -1258,7 +1502,15 @@ class MetadataHandler {
     }
   }
 
-  async updateTopAlbums(albums) {
+  async updateTopAlbums(
+    albums: Array<{
+      name: string;
+      playcount: string;
+      image: string | null;
+      artist: string;
+      url: string;
+    }>
+  ): Promise<void> {
     if (albums.length > 0) {
       this.elements.topAlbumsGrid.innerHTML = '';
 
@@ -1300,7 +1552,7 @@ class MetadataHandler {
     }
   }
 
-  navigateCarousel(direction) {
+  navigateCarousel(direction: number): void {
     if (this.artistImages.length === 0) return;
 
     this.currentImageIndex += direction;
@@ -1313,22 +1565,22 @@ class MetadataHandler {
     this.updateCarouselPosition();
   }
 
-  updateCarouselPosition() {
+  updateCarouselPosition(): void {
     const imageWidth = 120;
     const offset = -this.currentImageIndex * imageWidth;
     this.elements.carouselTrack.style.transform = `translateX(${offset}px)`;
   }
 
-  openModal(imageUrl) {
+  openModal(imageUrl: string): void {
     this.elements.modalImage.src = imageUrl;
     this.elements.imageModal.style.display = 'flex';
   }
 
-  closeModal() {
+  closeModal(): void {
     this.elements.imageModal.style.display = 'none';
   }
 
-  downloadImage() {
+  downloadImage(): void {
     const imageUrl = this.elements.modalImage.src;
 
     // Create safe filename from artist and track names
@@ -1336,12 +1588,13 @@ class MetadataHandler {
     const track = currentMusicData?.title || 'Unknown';
 
     // Sanitize filename: remove/replace unsafe characters
-    const sanitize = (str) => str
-      .replace(/[<>:"/\\|?*]/g, '') // Remove invalid filename chars
-      .replace(/\s+/g, '_')          // Replace spaces with underscores
-      .replace(/_{2,}/g, '_')        // Replace multiple underscores with single
-      .replace(/^_|_$/g, '')         // Remove leading/trailing underscores
-      .substring(0, 100);            // Limit length
+    const sanitize = (str: string) =>
+      str
+        .replace(/[<>:"/\\|?*]/g, '') // Remove invalid filename chars
+        .replace(/\s+/g, '_') // Replace spaces with underscores
+        .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+        .replace(/^_|_$/g, '') // Remove leading/trailing underscores
+        .substring(0, 100); // Limit length
 
     const safeArtist = sanitize(artist);
     const safeTrack = sanitize(track);
@@ -1357,7 +1610,7 @@ class MetadataHandler {
     document.body.removeChild(link);
   }
 
-  toggleBio() {
+  toggleBio(): void {
     if (this.bioExpanded) {
       this.elements.bioSummary.textContent = this.fullBio.substring(0, 300) + '...';
       this.elements.bioExpand.textContent = 'Show more';
@@ -1368,7 +1621,7 @@ class MetadataHandler {
     this.bioExpanded = !this.bioExpanded;
   }
 
-  clear() {
+  clear(): void {
     this.elements.container.style.display = 'none';
     this.elements.artistListeners.textContent = '';
     this.elements.artistPlaycount.textContent = '';
@@ -1392,11 +1645,23 @@ class MetadataHandler {
 
 const metadataHandler = new MetadataHandler();
 
-window.musicAPI.onMetadataUpdate((metadata) => {
+window.musicAPI.onMetadataUpdate((metadata: Metadata | null) => {
   metadataHandler.update(metadata);
 });
 
 class SettingsHandler {
+  modal: HTMLElement | null;
+  settingsBtn: HTMLElement | null;
+  closeBtn: HTMLElement | null;
+  loggedInSection: HTMLElement | null;
+  loggedOutSection: HTMLElement | null;
+  loginBtn: HTMLElement | null;
+  logoutBtn: HTMLElement | null;
+  userAvatar: HTMLImageElement | null;
+  userName: HTMLElement | null;
+  userEmail: HTMLElement | null;
+  currentTab: string;
+
   constructor() {
     this.modal = null;
     this.settingsBtn = null;
@@ -1411,7 +1676,7 @@ class SettingsHandler {
     this.currentTab = 'general';
   }
 
-  init() {
+  init(): void {
     this.modal = document.getElementById('settingsModal');
     this.settingsBtn = document.getElementById('settingsBtn');
     this.closeBtn = document.getElementById('settingsClose');
@@ -1419,7 +1684,7 @@ class SettingsHandler {
     this.loggedOutSection = document.getElementById('spotifyLoggedOut');
     this.loginBtn = document.getElementById('spotifyLoginBtn');
     this.logoutBtn = document.getElementById('spotifyLogoutBtn');
-    this.userAvatar = document.getElementById('userAvatar');
+    this.userAvatar = document.getElementById('userAvatar') as HTMLImageElement;
     this.userName = document.getElementById('userName');
     this.userEmail = document.getElementById('userEmail');
 
@@ -1433,31 +1698,41 @@ class SettingsHandler {
       this.show();
     });
 
-    this.settingsBtn.addEventListener('click', async () => {
-      await this.updateLoginStatus();
-      if (this.currentTab === 'storage') {
-        await this.loadCacheList();
-      }
-      this.show();
-    });
+    if (this.settingsBtn) {
+      this.settingsBtn.addEventListener('click', async () => {
+        await this.updateLoginStatus();
+        if (this.currentTab === 'storage') {
+          await this.loadCacheList();
+        }
+        this.show();
+      });
+    }
 
-    this.closeBtn.addEventListener('click', () => {
-      this.hide();
-    });
-
-    this.modal.addEventListener('click', (e) => {
-      if (e.target === this.modal) {
+    if (this.closeBtn) {
+      this.closeBtn.addEventListener('click', () => {
         this.hide();
-      }
-    });
+      });
+    }
 
-    this.loginBtn.addEventListener('click', () => {
-      window.musicAPI.spotifyLogin();
-    });
+    if (this.modal) {
+      this.modal.addEventListener('click', (e) => {
+        if (e.target === this.modal) {
+          this.hide();
+        }
+      });
+    }
 
-    this.logoutBtn.addEventListener('click', () => {
-      window.musicAPI.spotifyLogout();
-    });
+    if (this.loginBtn) {
+      this.loginBtn.addEventListener('click', () => {
+        window.musicAPI.spotifyLogin();
+      });
+    }
+
+    if (this.logoutBtn) {
+      this.logoutBtn.addEventListener('click', () => {
+        window.musicAPI.spotifyLogout();
+      });
+    }
 
     window.musicAPI.onSpotifyLoggedIn(() => {
       this.updateLoginStatus();
@@ -1467,19 +1742,19 @@ class SettingsHandler {
       this.updateLoginStatus();
     });
 
-    window.musicAPI.onSpotifyLoginError((error) => {
+    window.musicAPI.onSpotifyLoginError((error: string) => {
       console.error('Spotify login error:', error);
       alert(`Login failed: ${error}`);
     });
   }
 
-  async updateLoginStatus() {
+  async updateLoginStatus(): Promise<void> {
     const isLoggedIn = await window.musicAPI.spotifyIsLoggedIn();
 
     if (isLoggedIn) {
       const profile = await window.musicAPI.spotifyGetUserProfile();
 
-      if (profile) {
+      if (profile && this.userAvatar && this.userName && this.userEmail) {
         if (profile.imageUrl) {
           this.userAvatar.src = profile.imageUrl;
           this.userAvatar.style.display = 'block';
@@ -1497,41 +1772,51 @@ class SettingsHandler {
         }
       }
 
-      this.loggedOutSection.style.display = 'none';
-      this.loggedInSection.style.display = 'flex';
+      if (this.loggedOutSection && this.loggedInSection) {
+        this.loggedOutSection.style.display = 'none';
+        this.loggedInSection.style.display = 'flex';
+      }
     } else {
-      this.loggedInSection.style.display = 'none';
-      this.loggedOutSection.style.display = 'flex';
+      if (this.loggedInSection && this.loggedOutSection) {
+        this.loggedInSection.style.display = 'none';
+        this.loggedOutSection.style.display = 'flex';
+      }
     }
   }
 
-  show() {
-    this.modal.style.display = 'flex';
+  show(): void {
+    if (this.modal) {
+      this.modal.style.display = 'flex';
+    }
   }
 
-  hide() {
-    this.modal.style.display = 'none';
+  hide(): void {
+    if (this.modal) {
+      this.modal.style.display = 'none';
+    }
   }
 
-  initTabs() {
+  initTabs(): void {
     const tabs = document.querySelectorAll('.settings-tab');
-    tabs.forEach(tab => {
+    tabs.forEach((tab) => {
       tab.addEventListener('click', () => {
-        const tabName = tab.dataset.tab;
-        this.switchTab(tabName);
+        const tabName = (tab as HTMLElement).dataset.tab;
+        if (tabName) {
+          this.switchTab(tabName);
+        }
       });
     });
   }
 
-  switchTab(tabName) {
+  switchTab(tabName: string): void {
     this.currentTab = tabName;
 
-    document.querySelectorAll('.settings-tab').forEach(tab => {
-      tab.classList.toggle('active', tab.dataset.tab === tabName);
+    document.querySelectorAll('.settings-tab').forEach((tab) => {
+      tab.classList.toggle('active', (tab as HTMLElement).dataset.tab === tabName);
     });
 
-    document.querySelectorAll('.settings-section').forEach(section => {
-      section.style.display = section.id === `tab-${tabName}` ? 'block' : 'none';
+    document.querySelectorAll('.settings-section').forEach((section) => {
+      (section as HTMLElement).style.display = section.id === `tab-${tabName}` ? 'block' : 'none';
     });
 
     if (tabName === 'storage') {
@@ -1543,37 +1828,45 @@ class SettingsHandler {
     }
   }
 
-  initCacheTab() {
+  initCacheTab(): void {
     const clearAllBtn = document.getElementById('cacheClearAllBtn');
-    clearAllBtn.addEventListener('click', async () => {
-      if (confirm('Are you sure you want to clear all caches? This cannot be undone.')) {
-        await window.musicAPI.cacheClearAll();
-        await this.loadCacheList();
-      }
-    });
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener('click', async () => {
+        if (confirm('Are you sure you want to clear all caches? This cannot be undone.')) {
+          await window.musicAPI.cacheClearAll();
+          await this.loadCacheList();
+        }
+      });
+    }
   }
 
-  initLogsTab() {
+  initLogsTab(): void {
     const openFolderBtn = document.getElementById('logsOpenFolderBtn');
     const clearBtn = document.getElementById('logsClearBtn');
 
-    openFolderBtn.addEventListener('click', async () => {
-      await window.musicAPI.logsOpenFolder();
-    });
+    if (openFolderBtn) {
+      openFolderBtn.addEventListener('click', async () => {
+        await window.musicAPI.logsOpenFolder();
+      });
+    }
 
-    clearBtn.addEventListener('click', async () => {
-      if (confirm('Are you sure you want to clear all logs? This cannot be undone.')) {
-        const success = await window.musicAPI.logsClear();
-        if (success) {
-          await this.loadLogsStats();
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        if (confirm('Are you sure you want to clear all logs? This cannot be undone.')) {
+          const success = await window.musicAPI.logsClear();
+          if (success) {
+            await this.loadLogsStats();
+          }
         }
-      }
-    });
+      });
+    }
   }
 
-  async loadLogsStats() {
+  async loadLogsStats(): Promise<void> {
     const statsEl = document.getElementById('logsStatsText');
     const pathEl = document.getElementById('logsPath');
+
+    if (!statsEl || !pathEl) return;
 
     try {
       const stats = await window.musicAPI.logsGetStats();
@@ -1586,8 +1879,8 @@ class SettingsHandler {
     }
   }
 
-  async initLaunchAtLogin() {
-    const checkbox = document.getElementById('settings-launch-at-login');
+  async initLaunchAtLogin(): Promise<void> {
+    const checkbox = document.getElementById('settings-launch-at-login') as HTMLInputElement;
     if (!checkbox) return;
 
     const enabled = await window.musicAPI.getLaunchAtLogin();
@@ -1605,8 +1898,8 @@ class SettingsHandler {
     }
   }
 
-  async initTrayLyrics() {
-    const checkbox = document.getElementById('settings-tray-lyrics');
+  async initTrayLyrics(): Promise<void> {
+    const checkbox = document.getElementById('settings-tray-lyrics') as HTMLInputElement;
     if (!checkbox) return;
 
     const enabled = await window.musicAPI.getTrayLyrics();
@@ -1624,10 +1917,12 @@ class SettingsHandler {
     }
   }
 
-  async loadCacheList() {
+  async loadCacheList(): Promise<void> {
     const entries = await window.musicAPI.cacheList();
     const statsEl = document.getElementById('cacheStatsText');
     const listEl = document.getElementById('cacheList');
+
+    if (!statsEl || !listEl) return;
 
     if (entries.length === 0) {
       statsEl.textContent = 'No cached items';
@@ -1635,12 +1930,12 @@ class SettingsHandler {
       return;
     }
 
-    const totalSize = entries.reduce((sum, e) => sum + e.size, 0);
+    const totalSize = entries.reduce((sum: number, e: any) => sum + e.size, 0);
     const totalSizeMB = (totalSize / 1024 / 1024).toFixed(2);
     statsEl.textContent = `${entries.length} items • ${totalSizeMB} MB`;
 
     listEl.innerHTML = '';
-    entries.forEach(entry => {
+    entries.forEach((entry: any) => {
       const item = document.createElement('div');
       item.className = 'cache-item';
 
@@ -1659,35 +1954,37 @@ class SettingsHandler {
       `;
 
       const deleteBtn = item.querySelector('.cache-item-delete');
-      deleteBtn.addEventListener('click', async () => {
-        const success = await window.musicAPI.cacheDelete(entry.type, entry.key);
-        if (success) {
-          item.remove();
-          await this.loadCacheList();
-        }
-      });
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', async () => {
+          const success = await window.musicAPI.cacheDelete(entry.type, entry.key);
+          if (success) {
+            item.remove();
+            await this.loadCacheList();
+          }
+        });
+      }
 
       listEl.appendChild(item);
     });
   }
 
-  getCacheIcon(type) {
-    const icons = {
-      'lyrics': '🎵',
-      'images': '🖼️',
-      'metadata': '📊'
+  getCacheIcon(type: string): string {
+    const icons: { [key: string]: string } = {
+      lyrics: '🎵',
+      images: '🖼️',
+      metadata: '📊'
     };
     return icons[type] || '📁';
   }
 
-  formatCacheTitle(key) {
+  formatCacheTitle(key: string): string {
     if (key.length > 50) {
       return key.substring(0, 47) + '...';
     }
     return key;
   }
 
-  formatDate(timestamp) {
+  formatDate(timestamp: number): string {
     const now = Date.now();
     const diff = now - timestamp;
     const minutes = Math.floor(diff / 60000);
@@ -1702,46 +1999,50 @@ class SettingsHandler {
 }
 
 class UIVisibilityManager {
+  sections: string[];
+  settings: { [key: string]: boolean };
+
   constructor() {
     this.sections = ['player', 'lyrics', 'images', 'info', 'bio', 'tracks', 'albums', 'similar'];
     this.settings = {};
   }
 
-  async init() {
+  async init(): Promise<void> {
     this.settings = await window.musicAPI.visibilityGet();
     this.applyAll();
     this.bindCheckboxes();
     this.bindResetButton();
   }
 
-  applyAll() {
-    this.sections.forEach(section => {
-      this.applyVisibility(section, this.settings[section]);
+  applyAll(): void {
+    this.sections.forEach((section) => {
+      const visible = this.settings[section] !== undefined ? this.settings[section] : true;
+      this.applyVisibility(section, visible);
     });
   }
 
-  applyVisibility(section, visible) {
+  applyVisibility(section: string, visible: boolean): void {
     const elements = document.querySelectorAll(`[data-section="${section}"]`);
-    elements.forEach(el => {
+    elements.forEach((el) => {
       el.setAttribute('data-visible', visible ? 'true' : 'false');
     });
   }
 
-  bindCheckboxes() {
-    this.sections.forEach(section => {
-      const checkbox = document.getElementById(`visibility-${section}`);
+  bindCheckboxes(): void {
+    this.sections.forEach((section) => {
+      const checkbox = document.getElementById(`visibility-${section}`) as HTMLInputElement;
       if (checkbox) {
-        checkbox.checked = this.settings[section];
-        
+        checkbox.checked = this.settings[section] !== undefined ? this.settings[section] : true;
+
         const label = checkbox.closest('.visibility-option');
         if (label) {
           label.addEventListener('click', async (e) => {
             e.preventDefault();
             e.stopPropagation();
-            
+
             checkbox.checked = !checkbox.checked;
             const visible = checkbox.checked;
-            
+
             this.settings[section] = visible;
             this.applyVisibility(section, visible);
             await window.musicAPI.visibilitySet(section, visible);
@@ -1751,17 +2052,17 @@ class UIVisibilityManager {
     });
   }
 
-  bindResetButton() {
+  bindResetButton(): void {
     const resetBtn = document.getElementById('resetVisibilityBtn');
     if (resetBtn) {
       resetBtn.addEventListener('click', async () => {
         await window.musicAPI.visibilityReset();
         this.settings = await window.musicAPI.visibilityGet();
         this.applyAll();
-        this.sections.forEach(section => {
-          const checkbox = document.getElementById(`visibility-${section}`);
+        this.sections.forEach((section) => {
+          const checkbox = document.getElementById(`visibility-${section}`) as HTMLInputElement;
           if (checkbox) {
-            checkbox.checked = this.settings[section];
+            checkbox.checked = this.settings[section] !== undefined ? this.settings[section] : true;
           }
         });
       });
@@ -1773,20 +2074,24 @@ const visibilityManager = new UIVisibilityManager();
 const settingsHandler = new SettingsHandler();
 
 // Enable horizontal scrolling with vertical wheel for all horizontal scroll containers
-function initHorizontalScrolling() {
+function initHorizontalScrolling(): void {
   const horizontalScrollContainers = [
     document.getElementById('topTracksList'),
     document.getElementById('carouselTrack')?.parentElement,
     document.querySelector('.artist-images-carousel')
-  ].filter(el => el);
+  ].filter((el): el is HTMLElement => el !== null);
 
-  horizontalScrollContainers.forEach(container => {
-    container.addEventListener('wheel', (e) => {
-      if (e.deltaY !== 0) {
-        e.preventDefault();
-        container.scrollLeft += e.deltaY;
-      }
-    }, { passive: false });
+  horizontalScrollContainers.forEach((container) => {
+    container.addEventListener(
+      'wheel',
+      (e) => {
+        if (e.deltaY !== 0) {
+          e.preventDefault();
+          container.scrollLeft += e.deltaY;
+        }
+      },
+      { passive: false }
+    );
   });
 }
 

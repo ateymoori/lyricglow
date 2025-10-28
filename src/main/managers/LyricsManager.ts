@@ -1,15 +1,48 @@
-const secureFetch = require('../utils/SecureFetch');
-const Logger = require('../utils/Logger');
+/**
+ * Lyrics Manager
+ *
+ * Handles fetching and caching synchronized lyrics from LRCLIB API.
+ * Implements smart caching with offline fallback support.
+ */
+
+import SecureFetch from '../../shared/utils/SecureFetch';
+import Logger from '../../shared/utils/Logger';
+
+// Lyrics data structure
+export interface LyricsData {
+  synced: string | null;
+  plain: string | null;
+  instrumental: boolean;
+}
+
+// LRCLIB API response structure
+interface LRCLibResult {
+  trackName?: string;
+  name?: string;
+  artistName?: string;
+  syncedLyrics?: string;
+  plainLyrics?: string;
+  instrumental?: boolean;
+}
+
+// Cache interface matching UnifiedCacheManager
+interface CacheManager {
+  get(type: string, key: string): Promise<any>;
+  set(type: string, key: string, value: any): Promise<boolean>;
+}
 
 class LyricsManager {
-  constructor(cache) {
+  private cache: CacheManager;
+
+  constructor(cache: CacheManager) {
     this.cache = cache;
   }
 
-  async fetchLyrics(title, artist) {
+  async fetchLyrics(title: string, artist: string): Promise<LyricsData | null> {
     const cacheKey = `${title}-${artist}`.toLowerCase();
     const startTime = Date.now();
 
+    // Check cache first
     const cached = await this.cache.get('lyrics', cacheKey);
     if (cached) {
       Logger.lyrics.debug(`Cache hit: ${title} - ${artist}`);
@@ -18,6 +51,7 @@ class LyricsManager {
 
     Logger.lyrics.debug(`Fetching: ${title} - ${artist}`);
 
+    // Fetch from API
     const fetched = await this.fetchFromAPI(title, artist);
     const duration = Date.now() - startTime;
 
@@ -29,16 +63,18 @@ class LyricsManager {
     }
 
     Logger.lyrics.warn(`Not found (${duration}ms): ${title} - ${artist}`);
+
+    // Offline fallback
     const offlineCache = await this.cache.get('lyrics', cacheKey);
     return offlineCache;
   }
 
-  async fetchFromAPI(title, artist) {
+  private async fetchFromAPI(title: string, artist: string): Promise<LyricsData | null> {
     try {
       const query = encodeURIComponent(`${title} ${artist}`);
       const url = `https://lrclib.net/api/search?q=${query}`;
 
-      const response = await secureFetch.fetch(url, {
+      const response = await SecureFetch.fetch(url, {
         method: 'GET',
         headers: {
           'User-Agent': 'LyricGlow/1.0'
@@ -50,7 +86,7 @@ class LyricsManager {
         return null;
       }
 
-      const results = await response.json();
+      const results = await response.json() as LRCLibResult[];
 
       if (!results || results.length === 0) {
         return null;
@@ -58,26 +94,27 @@ class LyricsManager {
 
       const exactMatch = this.findBestMatch(results, title, artist);
 
-      if (exactMatch && exactMatch.syncedLyrics) {
+      if (exactMatch?.syncedLyrics) {
         return {
           synced: exactMatch.syncedLyrics,
-          plain: exactMatch.plainLyrics,
-          instrumental: exactMatch.instrumental
+          plain: exactMatch.plainLyrics || null,
+          instrumental: exactMatch.instrumental || false
         };
       }
 
       return null;
     } catch (error) {
-      Logger.lyrics.error('Fetch failed', error);
+      Logger.lyrics.error('Fetch failed', error as Error);
       return null;
     }
   }
 
-  findBestMatch(results, title, artist) {
-    const normalize = str => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+  private findBestMatch(results: LRCLibResult[], title: string, artist: string): LRCLibResult | null {
+    const normalize = (str: string): string => str.toLowerCase().replace(/[^a-z0-9]/g, '');
     const targetTitle = normalize(title);
     const targetArtist = normalize(artist);
 
+    // Try exact match
     const exactMatch = results.find(item => {
       const itemTitle = normalize(item.trackName || item.name || '');
       const itemArtist = normalize(item.artistName || '');
@@ -86,13 +123,14 @@ class LyricsManager {
 
     if (exactMatch) return exactMatch;
 
+    // Try title-only match
     const titleMatch = results.find(item => {
       const itemTitle = normalize(item.trackName || item.name || '');
       return itemTitle === targetTitle;
     });
 
-    return titleMatch || results[0];
+    return titleMatch || results[0] || null;
   }
 }
 
-module.exports = LyricsManager;
+export default LyricsManager;

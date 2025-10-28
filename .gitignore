@@ -3,6 +3,9 @@ node_modules/
 
 # Build outputs
 dist/
+out/
+release/
+*.tsbuildinfo
 native/.module-cache/
 native/bin/
 *.dmg
@@ -32,17 +35,50 @@ SUBMISSION_TRACKER.md
 # macOS
 .DS_Store
 
-# IDE
+# IDE & AI Tools
 .vscode/
 .idea/
 .claude/
+.taskmaster/
+.mcp.json
+.cursor/
+.windsurf/
+*.claude.*
+*taskmaster*
+*-ai.json
+*-mcp.json
+CLAUDE.md
+MIGRATION.md
 
 # Temporary files
 *.tmp
 *.swp
 *~
+*.tar.gz
 
 # Environment (contains API keys and secrets)
 .env
 .env.local
 .env.*.local
+
+# Logs
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-debug.log
+# Dependency directories
+# Environment variables
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# OS specific
+
+# Task files
+# tasks.json
+# tasks/ 

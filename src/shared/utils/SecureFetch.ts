@@ -1,29 +1,31 @@
-const https = require('https');
-const Logger = require('./Logger');
-
 /**
- * Smart fetch with SSL fallback for corporate VPN compatibility
- * Tries secure connection first, falls back to insecure if SSL fails
+ * Smart Fetch with SSL Fallback
+ *
+ * Provides fetch with automatic SSL verification fallback for corporate VPN compatibility.
+ * Tries secure connection first, falls back to insecure if SSL fails.
+ * Preserves existing clean architecture and SSL handling logic.
  */
+
+import https from 'https';
+import fetch, { RequestInit, Response } from 'node-fetch';
+import Logger from './Logger';
+
+type ConnectionMode = 'untested' | 'secure' | 'corporate-vpn';
+
 class SecureFetch {
-  constructor() {
-    this.sslBypassEnabled = false;
-    this.hasTestedConnection = false;
-  }
+  private sslBypassEnabled = false;
+  private hasTestedConnection = false;
 
   /**
    * Fetch with automatic SSL fallback
-   * @param {string} url - URL to fetch
-   * @param {object} options - Fetch options
-   * @returns {Promise<Response>}
    */
-  async fetch(url, options = {}) {
-    const timeoutMs = options.timeout || 10000;
+  async fetch(url: string, options: RequestInit = {}): Promise<Response> {
+    const timeoutMs = (options as any).timeout || 10000;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const response = await this._fetchSecure(url, {
+      const response = await this.fetchSecure(url, {
         ...options,
         signal: controller.signal
       });
@@ -39,20 +41,20 @@ class SecureFetch {
     } catch (error) {
       clearTimeout(timeoutId);
 
-      if (error.name === 'AbortError') {
+      if ((error as any).name === 'AbortError') {
         const timeoutError = new Error(`Request timeout after ${timeoutMs}ms`);
         Logger.app.error('Request timeout', { url, timeout: timeoutMs });
         throw timeoutError;
       }
 
-      if (this._isSSLError(error)) {
+      if (this.isSSLError(error as Error)) {
         Logger.app.warn('SSL verification failed, retrying with bypass (corporate VPN detected)');
 
         const retryController = new AbortController();
         const retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs);
 
         try {
-          const response = await this._fetchInsecure(url, {
+          const response = await this.fetchInsecure(url, {
             ...options,
             signal: retryController.signal
           });
@@ -68,13 +70,13 @@ class SecureFetch {
         } catch (fallbackError) {
           clearTimeout(retryTimeoutId);
 
-          if (fallbackError.name === 'AbortError') {
+          if ((fallbackError as any).name === 'AbortError') {
             const timeoutError = new Error(`Request timeout after ${timeoutMs}ms`);
             Logger.app.error('Request timeout on SSL bypass', { url, timeout: timeoutMs });
             throw timeoutError;
           }
 
-          Logger.app.error('Both secure and insecure connection attempts failed', fallbackError);
+          Logger.app.error('Both secure and insecure connection attempts failed', fallbackError as Error);
           throw fallbackError;
         }
       }
@@ -86,10 +88,7 @@ class SecureFetch {
   /**
    * Fetch with SSL verification enabled (secure)
    */
-  async _fetchSecure(url, options) {
-    const fetchModule = await import('node-fetch');
-    const fetch = fetchModule.default;
-
+  private async fetchSecure(url: string, options: RequestInit): Promise<Response> {
     return fetch(url, {
       ...options,
       agent: new https.Agent({
@@ -101,10 +100,7 @@ class SecureFetch {
   /**
    * Fetch with SSL verification disabled (insecure fallback)
    */
-  async _fetchInsecure(url, options) {
-    const fetchModule = await import('node-fetch');
-    const fetch = fetchModule.default;
-
+  private async fetchInsecure(url: string, options: RequestInit): Promise<Response> {
     return fetch(url, {
       ...options,
       agent: new https.Agent({
@@ -116,7 +112,7 @@ class SecureFetch {
   /**
    * Check if error is SSL-related
    */
-  _isSSLError(error) {
+  private isSSLError(error: Error): boolean {
     const sslErrorCodes = [
       'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
       'SELF_SIGNED_CERT_IN_CHAIN',
@@ -128,7 +124,7 @@ class SecureFetch {
     ];
 
     const errorMessage = error.message || '';
-    const errorCode = error.code || '';
+    const errorCode = (error as any).code || '';
 
     return sslErrorCodes.some(code =>
       errorMessage.includes(code) || errorCode === code
@@ -138,7 +134,7 @@ class SecureFetch {
   /**
    * Get current connection mode
    */
-  getConnectionMode() {
+  getConnectionMode(): ConnectionMode {
     if (!this.hasTestedConnection) {
       return 'untested';
     }
@@ -147,4 +143,4 @@ class SecureFetch {
 }
 
 // Export singleton instance
-module.exports = new SecureFetch();
+export default new SecureFetch();
