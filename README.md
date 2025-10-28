@@ -9,7 +9,7 @@
 Experience your music like never before with **word-by-word synchronized lyrics**, rich artist metadata, and beautiful album artwork. A floating, always-on-top companion for Spotify, Apple Music, and YouTube Music.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.3.0-brightgreen.svg)](#)
+[![Version](https://img.shields.io/badge/Version-0.4.0-brightgreen.svg)](#)
 [![macOS](https://img.shields.io/badge/macOS-11.0+-lightgrey.svg?logo=apple)](https://www.apple.com/macos)
 [![Electron](https://img.shields.io/badge/Electron-33.4.11-47848F.svg?logo=electron)](https://www.electronjs.org/)
 
@@ -329,7 +329,8 @@ npm run release        # Auto version bump + build
 | Category | Technology |
 |----------|-----------|
 | **Framework** | [Electron 33.4.11](https://www.electronjs.org/) |
-| **Language** | JavaScript (ES2022) |
+| **Language** | TypeScript 5.9.3 (Strict Mode) |
+| **Build System** | [electron-vite](https://electron-vite.org/) + [Vite 5.4.21](https://vitejs.dev/) |
 | **Lyrics API** | [LRCLIB](https://lrclib.net/) - Synchronized lyrics database |
 | **Metadata API** | [TheAudioDB](https://www.theaudiodb.com/) - Artist information |
 | **Music Integration** | [Spotify Web API](https://developer.spotify.com/) - OAuth & enhanced features |
@@ -476,10 +477,10 @@ Every star helps more people discover LyricGlow! 🌟
 
 ## 🏷️ Keywords & Topics
 
-`synchronized-lyrics` `real-time-lyrics` `spotify-lyrics` `apple-music-lyrics` `youtube-music-lyrics` `macos-app` `electron-app` `music-player` `lyrics-display` `now-playing` `desktop-lyrics` `floating-widget` `lyrics-widget` `music-companion` `karaoke` `rtl-support` `arabic-lyrics` `persian-lyrics` `hebrew-lyrics` `multilingual` `music-metadata` `artist-biography` `album-artwork` `spotify-integration` `free-app` `open-source` `mit-license` `electron` `javascript` `macos-big-sur` `apple-silicon` `m1-m2-m3` `lyrics-automation` `lyrics-synchronization` `lrc-format` `music-visualization` `transparent-overlay` `always-on-top` `music-widget` `desktop-widget` `lyrics-api`
+`synchronized-lyrics` `real-time-lyrics` `spotify-lyrics` `apple-music-lyrics` `youtube-music-lyrics` `macos-app` `electron-app` `music-player` `lyrics-display` `now-playing` `desktop-lyrics` `floating-widget` `lyrics-widget` `music-companion` `karaoke` `rtl-support` `arabic-lyrics` `persian-lyrics` `hebrew-lyrics` `multilingual` `music-metadata` `artist-biography` `album-artwork` `spotify-integration` `free-app` `open-source` `mit-license` `electron` `typescript` `macos-big-sur` `apple-silicon` `m1-m2-m3` `lyrics-automation` `lyrics-synchronization` `lrc-format` `music-visualization` `transparent-overlay` `always-on-top` `music-widget` `desktop-widget` `lyrics-api`
 
 ---
 
-<sub>Made with ❤️ for music lovers | Last updated: October 2024 | Version 0.3.0</sub>
+<sub>Made with ❤️ for music lovers | Last updated: October 2025 | Version 0.4.0</sub>
 
 </div>
