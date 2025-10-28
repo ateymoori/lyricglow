@@ -88,29 +88,41 @@ function updatePlayPauseButton(isPlaying) {
   }
 }
 
-class LyricsHandler {
+/**
+ * LyricsSyncManager: Single source of truth for lyrics state
+ *
+ * This class manages all lyrics state and coordinates atomic updates
+ * across all three display locations (main app, modal, system tray).
+ *
+ * Design principles:
+ * - Single source of truth: All lyrics state lives here
+ * - Atomic broadcast: All displays update simultaneously from same data
+ * - No duplication: Logic exists in one place only
+ * - Pure consumers: Display components are stateless UI renderers
+ */
+class LyricsSyncManager {
   constructor() {
+    // Single source of truth for lyrics state
     this.lyrics = [];
     this.currentIndex = -1;
-    this.container = null;
-    this.elements = {};
+    this.currentPosition = 0;
     this.isRTL = false;
-    this.cachedWords = [];
-    this.lastGlowUpdate = 0;
-    this.glowUpdateInterval = 33;
-    this.wordStates = [];
+    this.state = 'empty'; // empty | loading | unavailable | instrumental | ready
+
+    // Display references (injected after construction)
+    this.mainDisplay = null;
+    this.modalDisplay = null;
+
+    // Performance optimization: throttle tray updates
+    this.lastTrayUpdate = 0;
+    this.lastTrayText = '';
+    this.trayUpdateInterval = 100; // 100ms for tray (smoother than 500ms)
   }
 
-  init() {
-    this.container = document.getElementById('lyricsContainer');
-    this.elements = {
-      previous: document.getElementById('lyricsPrevious'),
-      current: document.getElementById('lyricsCurrent'),
-      next: document.getElementById('lyricsNext'),
-      currentText: document.querySelector('#lyricsCurrent .lyrics-text')
-    };
-  }
-
+  /**
+   * Parse LRC format into structured lyrics array
+   * Format: [MM:SS.CS]Text
+   */
   parseLRC(content) {
     if (!content) return [];
 
@@ -125,71 +137,241 @@ class LyricsHandler {
         lyrics.push({ time, text: text.trim() });
       }
     }
+
     return lyrics.sort((a, b) => a.time - b.time);
   }
 
+  /**
+   * Set lyrics from IPC event (single entry point)
+   */
   setLyrics(lyricsData) {
+    // Handle unavailable lyrics
     if (!lyricsData || !lyricsData.synced) {
-      this.showNotAvailable();
+      this.clear();
+      this.state = 'unavailable';
+      this.broadcastState();
       return;
     }
 
+    // Handle instrumental tracks
     if (lyricsData.instrumental) {
-      this.showInstrumental();
+      this.clear();
+      this.state = 'instrumental';
+      this.broadcastState();
       return;
     }
 
+    // Parse and store lyrics
     this.lyrics = this.parseLRC(lyricsData.synced);
-    this.currentIndex = 0; // Start at first line
-    this.container.removeAttribute('data-state');
-    this.updateDisplay(); // Show first line immediately
+    this.currentIndex = 0;
+    this.state = 'ready';
+
+    // Detect text direction once for all displays
+    if (this.lyrics.length > 0) {
+      this.isRTL = this.detectRTL(this.lyrics[0].text);
+    }
+
+    this.broadcastState();
+    this.broadcast(); // Initial display
   }
 
+  /**
+   * Update playback position and trigger sync if line changed
+   * Called from animation loop (60 FPS)
+   */
   updatePosition(position) {
-    if (!this.lyrics.length) return;
+    if (this.state !== 'ready' || !this.lyrics.length) return;
 
-    const index = this.findCurrentIndex(position);
-    if (index === this.currentIndex) {
-      this.updateProgress(position);
-      return;
+    this.currentPosition = position;
+    const newIndex = this.findCurrentIndex(position);
+
+    // Only broadcast when line changes (atomic update)
+    if (newIndex !== this.currentIndex) {
+      this.currentIndex = newIndex;
+      this.broadcast(); // ← Single atomic update to ALL displays
     }
-
-    this.currentIndex = index;
-    this.updateDisplay();
-    this.updateProgress(position);
   }
 
+  /**
+   * Find current lyric line index based on position
+   */
   findCurrentIndex(position) {
-    // If position is before first lyric, show first lyric
-    if (this.lyrics.length > 0 && position < this.lyrics[0].time) {
-      return 0;
-    }
+    if (!this.lyrics.length) return -1;
 
+    // Show first line if before first timestamp
+    if (position < this.lyrics[0].time) return 0;
+
+    // Find the last line whose timestamp has passed
     for (let i = this.lyrics.length - 1; i >= 0; i--) {
-      if (position >= this.lyrics[i].time) {
-        return i;
-      }
+      if (position >= this.lyrics[i].time) return i;
     }
-    return 0; // Default to first line instead of -1
+
+    return 0;
   }
 
-  updateDisplay() {
-    const previous = this.currentIndex > 0 ? this.lyrics[this.currentIndex - 1].text : '';
-    const current = this.currentIndex >= 0 ? this.lyrics[this.currentIndex].text : '';
-    const next = this.currentIndex < this.lyrics.length - 1 ? this.lyrics[this.currentIndex + 1].text : '';
+  /**
+   * ATOMIC BROADCAST: Update all three displays simultaneously
+   * This is the core synchronization mechanism
+   */
+  broadcast() {
+    if (this.state !== 'ready' || this.currentIndex < 0) return;
 
-    this.elements.previous.textContent = previous;
-    this.elements.next.textContent = next;
+    const currentLine = this.lyrics[this.currentIndex];
+    const prevLine = this.currentIndex > 0 ? this.lyrics[this.currentIndex - 1] : null;
+    const nextLine = this.currentIndex < this.lyrics.length - 1 ?
+                     this.lyrics[this.currentIndex + 1] : null;
 
-    this.setCurrentLineWithGlow(current || '♪ ♪ ♪');
+    // Prepare sync data payload
+    const syncData = {
+      currentLine,
+      prevLine,
+      nextLine,
+      currentIndex: this.currentIndex,
+      totalLines: this.lyrics.length,
+      isRTL: this.isRTL,
+      position: this.currentPosition
+    };
+
+    // 1. Update main app display (3-line view with word glow)
+    if (this.mainDisplay) {
+      this.mainDisplay.render(syncData);
+    }
+
+    // 2. Update modal display (full lyrics scroll)
+    if (this.modalDisplay) {
+      this.modalDisplay.updateCurrent(syncData);
+    }
+
+    // 3. Update system tray (throttled to 100ms)
+    this.updateTray(currentLine.text);
   }
 
-  setCurrentLineWithGlow(text) {
-    this.isRTL = this.detectRTL(text);
+  /**
+   * Broadcast state changes (loading, unavailable, instrumental)
+   */
+  broadcastState() {
+    if (this.mainDisplay) {
+      this.mainDisplay.setState(this.state);
+    }
 
+    if (this.modalDisplay) {
+      this.modalDisplay.setState(this.state);
+    }
+
+    // Clear tray for non-ready states
+    if (this.state !== 'ready') {
+      window.musicAPI.updateTrayLyrics('');
+    }
+  }
+
+  /**
+   * Update system tray with throttling (100ms) to prevent excessive IPC
+   */
+  updateTray(text) {
+    const now = Date.now();
+
+    // Throttle: only update every 100ms
+    if (now - this.lastTrayUpdate < this.trayUpdateInterval) return;
+
+    // Skip if text hasn't changed
+    if (text === this.lastTrayText) return;
+
+    this.lastTrayUpdate = now;
+    this.lastTrayText = text;
+
+    // Send to main process via IPC
+    window.musicAPI.updateTrayLyrics(text);
+  }
+
+  /**
+   * Detect RTL languages (Arabic, Persian, Hebrew)
+   */
+  detectRTL(text) {
+    const rtlChars = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+    return rtlChars.test(text);
+  }
+
+  /**
+   * Show loading state
+   */
+  showLoading() {
+    this.clear();
+    this.state = 'loading';
+    this.broadcastState();
+  }
+
+  /**
+   * Clear all lyrics state
+   */
+  clear() {
+    this.lyrics = [];
+    this.currentIndex = -1;
+    this.currentPosition = 0;
+    this.isRTL = false;
+    this.lastTrayText = '';
+    this.state = 'empty';
+  }
+}
+
+/**
+ * LyricsMainDisplay: Pure UI component for 3-line lyrics display
+ *
+ * Responsibilities:
+ * - Render previous/current/next lines
+ * - Display word-by-word glow effect
+ * - Handle text direction (LTR/RTL)
+ *
+ * Does NOT manage state - receives all data from LyricsSyncManager
+ */
+class LyricsMainDisplay {
+  constructor() {
+    this.container = null;
+    this.elements = {};
+
+    // Word glow state (managed per current line)
+    this.cachedWords = [];
+    this.wordStates = [];
+    this.lastGlowUpdate = 0;
+    this.glowUpdateInterval = 33; // 30 FPS for word glow
+
+    // Store current sync data for glow calculation
+    this.currentSyncData = null;
+  }
+
+  init() {
+    this.container = document.getElementById('lyricsContainer');
+    this.elements = {
+      previous: document.getElementById('lyricsPrevious'),
+      current: document.getElementById('lyricsCurrent'),
+      next: document.getElementById('lyricsNext'),
+      currentText: document.querySelector('#lyricsCurrent .lyrics-text')
+    };
+  }
+
+  /**
+   * Render 3-line display from sync data (pure function)
+   * Called by LyricsSyncManager when line changes
+   */
+  render(syncData) {
+    this.currentSyncData = syncData;
+
+    // Update previous and next lines
+    this.elements.previous.textContent = syncData.prevLine?.text || '';
+    this.elements.next.textContent = syncData.nextLine?.text || '';
+
+    // Update current line with word spans
+    this.setCurrentLine(syncData.currentLine.text, syncData.isRTL);
+  }
+
+  /**
+   * Create word spans for current line
+   */
+  setCurrentLine(text, isRTL) {
     const words = text.split(' ').filter(w => w.length > 0);
+
+    // Clear and rebuild
     this.elements.currentText.innerHTML = '';
-    this.elements.currentText.style.direction = this.isRTL ? 'rtl' : 'ltr';
+    this.elements.currentText.style.direction = isRTL ? 'rtl' : 'ltr';
 
     this.cachedWords = [];
     this.wordStates = [];
@@ -198,27 +380,31 @@ class LyricsHandler {
       const span = document.createElement('span');
       span.className = 'lyrics-word';
       span.textContent = word;
-      span.dataset.index = index;
       this.elements.currentText.appendChild(span);
 
       this.cachedWords.push(span);
       this.wordStates.push({ glowing: false, intensity: 0 });
 
+      // Add space between words
       if (index < words.length - 1) {
-        const space = document.createTextNode(' ');
-        this.elements.currentText.appendChild(space);
+        this.elements.currentText.appendChild(document.createTextNode(' '));
       }
     });
   }
 
-  updateProgress(position) {
-    if (this.currentIndex < 0 || this.currentIndex >= this.lyrics.length - 1) {
-      this.clearGlow();
-      return;
-    }
+  /**
+   * Update word glow effect (called from animation loop at 60 FPS)
+   * Throttled internally to 30 FPS for performance
+   */
+  updateGlow(position) {
+    if (!this.currentSyncData || !this.currentSyncData.nextLine) return;
 
-    const currentLine = this.lyrics[this.currentIndex];
-    const nextLine = this.lyrics[this.currentIndex + 1];
+    // Throttle to 30 FPS
+    const now = Date.now();
+    if (now - this.lastGlowUpdate < this.glowUpdateInterval) return;
+    this.lastGlowUpdate = now;
+
+    const { currentLine, nextLine } = this.currentSyncData;
     const duration = nextLine.time - currentLine.time;
     const elapsed = position - currentLine.time;
     const progress = Math.min(1, Math.max(0, elapsed / duration));
@@ -226,13 +412,10 @@ class LyricsHandler {
     this.applyWordGlow(progress);
   }
 
+  /**
+   * Apply glow effect to words based on progress (0 to 1)
+   */
   applyWordGlow(progress) {
-    const now = Date.now();
-    if (now - this.lastGlowUpdate < this.glowUpdateInterval) {
-      return;
-    }
-    this.lastGlowUpdate = now;
-
     if (!this.cachedWords.length) return;
 
     const totalWords = this.cachedWords.length;
@@ -241,19 +424,23 @@ class LyricsHandler {
     this.cachedWords.forEach((word, index) => {
       const wordProgress = Math.min(1, Math.max(0, glowPosition - index));
       const shouldGlow = wordProgress > 0;
-      const newIntensity = shouldGlow ? (wordProgress > 0.5 ? 1 : wordProgress * 2) : 0;
+
+      // Fade in effect: 0-0.5 = fade, 0.5-1.0 = full glow
+      const newIntensity = shouldGlow ?
+        (wordProgress > 0.5 ? 1 : wordProgress * 2) : 0;
 
       const state = this.wordStates[index];
 
-      if (shouldGlow !== state.glowing || Math.abs(newIntensity - state.intensity) > 0.01) {
+      // Only update DOM if state changed (performance)
+      if (shouldGlow !== state.glowing ||
+          Math.abs(newIntensity - state.intensity) > 0.01) {
+
         state.glowing = shouldGlow;
         state.intensity = newIntensity;
 
         if (shouldGlow) {
           word.style.setProperty('--glow-intensity', newIntensity);
-          if (!word.classList.contains('glowing')) {
-            word.classList.add('glowing');
-          }
+          word.classList.add('glowing');
         } else {
           word.classList.remove('glowing');
           word.style.removeProperty('--glow-intensity');
@@ -262,52 +449,45 @@ class LyricsHandler {
     });
   }
 
-  clearGlow() {
-    this.cachedWords.forEach((word, index) => {
-      word.classList.remove('glowing');
-      word.style.removeProperty('--glow-intensity');
-      if (this.wordStates[index]) {
-        this.wordStates[index].glowing = false;
-        this.wordStates[index].intensity = 0;
-      }
-    });
+  /**
+   * Set display state (loading, unavailable, instrumental, ready)
+   */
+  setState(state) {
+    if (state === 'ready') {
+      this.container.removeAttribute('data-state');
+    } else {
+      this.container.setAttribute('data-state', state);
+      this.clear();
+    }
   }
 
-  detectRTL(text) {
-    const rtlChars = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
-    return rtlChars.test(text);
-  }
-
-  showLoading() {
-    this.container.setAttribute('data-state', 'loading');
-    this.clear();
-  }
-
-  showNotAvailable() {
-    this.container.setAttribute('data-state', 'unavailable');
-    this.clear();
-  }
-
-  showInstrumental() {
-    this.container.setAttribute('data-state', 'instrumental');
-    this.clear();
-  }
-
+  /**
+   * Clear display
+   */
   clear() {
-    this.lyrics = [];
-    this.currentIndex = -1;
     this.elements.previous.textContent = '';
     this.elements.currentText.innerHTML = '';
     this.elements.next.textContent = '';
     this.cachedWords = [];
     this.wordStates = [];
+    this.currentSyncData = null;
     this.lastGlowUpdate = 0;
   }
 }
 
-class FullLyricsModal {
-  constructor(lyricsHandler) {
-    this.lyricsHandler = lyricsHandler;
+/**
+ * FullLyricsModalDisplay: Pure UI component for full lyrics modal
+ *
+ * Responsibilities:
+ * - Display all lyrics in scrollable view
+ * - Highlight current line
+ * - Auto-scroll to current line
+ *
+ * Does NOT manage state - receives all data from LyricsSyncManager
+ */
+class FullLyricsModalDisplay {
+  constructor(syncManager) {
+    this.syncManager = syncManager;
     this.modal = null;
     this.elements = {};
     this.isOpen = false;
@@ -323,6 +503,7 @@ class FullLyricsModal {
       openBtn: document.getElementById('fullLyricsBtn')
     };
 
+    // Event listeners
     this.elements.openBtn.addEventListener('click', () => {
       this.show();
     });
@@ -370,6 +551,9 @@ class FullLyricsModal {
     this.isOpen = false;
   }
 
+  /**
+   * Refresh entire lyrics list (called when lyrics change)
+   */
   refresh() {
     if (!this.isOpen) return;
 
@@ -380,11 +564,14 @@ class FullLyricsModal {
     setTimeout(() => this.scrollToCurrentLine(), 100);
   }
 
+  /**
+   * Rebuild full lyrics list from sync manager
+   */
   updateLyrics() {
-    const lyrics = this.lyricsHandler.lyrics;
-    const container = this.lyricsHandler.container;
-    const state = container?.getAttribute('data-state');
+    const state = this.syncManager.state;
+    const lyrics = this.syncManager.lyrics;
 
+    // Handle special states
     if (state === 'loading') {
       this.elements.text.setAttribute('data-state', 'loading');
       this.elements.text.textContent = 'Loading lyrics...';
@@ -403,17 +590,16 @@ class FullLyricsModal {
       return;
     }
 
-    if (!lyrics || lyrics.length === 0) {
+    if (state !== 'ready' || !lyrics.length) {
       this.elements.text.setAttribute('data-state', 'unavailable');
       this.elements.text.textContent = 'No lyrics available';
       return;
     }
 
+    // Render all lyrics
     this.elements.text.removeAttribute('data-state');
     this.elements.text.innerHTML = '';
-
-    const isRTL = lyrics.length > 0 && this.lyricsHandler.detectRTL(lyrics[0].text);
-    this.elements.text.style.direction = isRTL ? 'rtl' : 'ltr';
+    this.elements.text.style.direction = this.syncManager.isRTL ? 'rtl' : 'ltr';
 
     lyrics.forEach((line, index) => {
       const lineEl = document.createElement('div');
@@ -422,7 +608,7 @@ class FullLyricsModal {
       lineEl.dataset.index = index;
       lineEl.dataset.time = line.time;
 
-      if (index === this.lyricsHandler.currentIndex) {
+      if (index === this.syncManager.currentIndex) {
         lineEl.classList.add('current');
       }
 
@@ -434,14 +620,15 @@ class FullLyricsModal {
     });
   }
 
-  updateCurrentLine() {
+  /**
+   * Update current line highlight (called by LyricsSyncManager on broadcast)
+   */
+  updateCurrent(syncData) {
     if (!this.isOpen) return;
 
     const lines = this.elements.text.querySelectorAll('.lyrics-line');
-    const currentIndex = this.lyricsHandler.currentIndex;
-
     lines.forEach((line, index) => {
-      if (index === currentIndex) {
+      if (index === syncData.currentIndex) {
         line.classList.add('current');
       } else {
         line.classList.remove('current');
@@ -451,6 +638,9 @@ class FullLyricsModal {
     this.scrollToCurrentLine();
   }
 
+  /**
+   * Scroll to current line if auto-scroll enabled
+   */
   scrollToCurrentLine() {
     if (!this.autoScrollEnabled) return;
 
@@ -462,10 +652,30 @@ class FullLyricsModal {
       });
     }
   }
+
+  /**
+   * Set state for modal display
+   */
+  setState(state) {
+    // State is already handled in updateLyrics()
+    // This is called for consistency with LyricsMainDisplay
+  }
 }
 
-const lyricsHandler = new LyricsHandler();
-const fullLyricsModal = new FullLyricsModal(lyricsHandler);
+// ═══════════════════════════════════════════════════════════════════
+// Initialize unified sync system
+// ═══════════════════════════════════════════════════════════════════
+
+const lyricsSyncManager = new LyricsSyncManager();
+const lyricsMainDisplay = new LyricsMainDisplay();
+const fullLyricsModalDisplay = new FullLyricsModalDisplay(lyricsSyncManager);
+
+// Connect displays to sync manager for atomic updates
+lyricsSyncManager.mainDisplay = lyricsMainDisplay;
+lyricsSyncManager.modalDisplay = fullLyricsModalDisplay;
+
+// ═══════════════════════════════════════════════════════════════════
+
 let currentMusicData = null;
 let previousTrackKey = null;
 
@@ -481,6 +691,15 @@ function startInternalTimer() {
   updateInternalPosition();
 }
 
+/**
+ * Main animation loop (60 FPS)
+ *
+ * Updates:
+ * - Progress bar
+ * - Time display
+ * - Lyrics sync (atomic update via LyricsSyncManager)
+ * - Word glow effect (high FPS for smoothness)
+ */
 function updateInternalPosition() {
   if (internalIsPlaying && currentMusicData && currentMusicData.duration) {
     const now = Date.now();
@@ -492,12 +711,17 @@ function updateInternalPosition() {
       internalPosition = currentMusicData.duration;
     }
 
+    // Update progress bar
     const progress = (internalPosition / currentMusicData.duration) * 100;
     elements.progressBar.style.width = `${progress}%`;
     elements.currentTime.textContent = formatTime(internalPosition);
 
-    lyricsHandler.updatePosition(internalPosition);
-    fullLyricsModal.updateCurrentLine();
+    // ★★★ ATOMIC SYNC ★★★
+    // Update position in sync manager (broadcasts to all displays when line changes)
+    lyricsSyncManager.updatePosition(internalPosition);
+
+    // Update word glow separately (needs 60 FPS, throttled internally to 30 FPS)
+    lyricsMainDisplay.updateGlow(internalPosition);
   }
 
   requestAnimationFrame(updateInternalPosition);
@@ -530,7 +754,7 @@ function updateDisplay(data) {
     elements.duration.textContent = '0:00';
     updatePlayPauseButton(false);
     clearDetails();
-    lyricsHandler.clear();
+    lyricsSyncManager.clear();
     metadataHandler.clear();
     previousTrackKey = null;
     internalIsPlaying = false;
@@ -544,7 +768,7 @@ function updateDisplay(data) {
 
   if (trackChanged) {
     isTrackChanging = true;
-    lyricsHandler.clear();
+    lyricsSyncManager.clear();
     metadataHandler.clear();
     internalPosition = 0;
     previousTrackKey = currentTrackKey;
@@ -623,21 +847,33 @@ function clearDetails() {
 
 window.musicAPI.onUpdate(updateDisplay);
 
+/**
+ * Lyrics IPC handler: Single entry point for lyrics updates
+ * Coordinates updates to all three displays atomically
+ */
 window.musicAPI.onLyricsUpdate((lyricsData) => {
   if (lyricsData === null) {
+    // Show loading state if not during track change
     if (!isTrackChanging) {
-      lyricsHandler.showLoading();
+      lyricsSyncManager.showLoading();
       setTimeout(() => {
-        if (!lyricsHandler.lyrics.length) {
-          lyricsHandler.showNotAvailable();
+        if (lyricsSyncManager.state === 'loading') {
+          lyricsSyncManager.clear();
+          lyricsSyncManager.state = 'unavailable';
+          lyricsSyncManager.broadcastState();
         }
       }, 2000);
     }
   } else {
-    lyricsHandler.setLyrics(lyricsData);
-    fullLyricsModal.refresh();
+    // Set lyrics in sync manager (broadcasts atomically to all displays)
+    lyricsSyncManager.setLyrics(lyricsData);
+
+    // Refresh modal if open
+    fullLyricsModalDisplay.refresh();
+
+    // Update position if we have valid data
     if (!isTrackChanging && currentMusicData && currentMusicData.position !== undefined) {
-      lyricsHandler.updatePosition(internalPosition);
+      lyricsSyncManager.updatePosition(internalPosition);
     }
   }
 });
@@ -1555,8 +1791,9 @@ function initHorizontalScrolling() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  lyricsHandler.init();
-  fullLyricsModal.init();
+  // Initialize displays
+  lyricsMainDisplay.init();
+  fullLyricsModalDisplay.init();
   metadataHandler.init();
   settingsHandler.init();
   await visibilityManager.init();

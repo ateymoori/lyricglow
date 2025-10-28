@@ -57,10 +57,7 @@ let manualOverride = false;
 let hideTimeout = null;
 let settingsStore = null;
 
-// Tray lyrics display
-let currentLyrics = [];
-let currentLyricIndex = -1;
-let lastTrayUpdate = '';
+// Tray lyrics setting
 let trayLyricsEnabled = true; // Show lyrics in system tray (default: enabled)
 
 // Register custom protocol for OAuth callback (must be before app.whenReady)
@@ -100,7 +97,6 @@ function saveTrayLyricsSetting(enabled) {
   // Clear tray immediately if disabled
   if (!enabled && tray) {
     tray.setTitle('');
-    lastTrayUpdate = '';
   }
 
   Logger.app.info(`Tray lyrics ${enabled ? 'enabled' : 'disabled'}`);
@@ -178,69 +174,20 @@ function handleWindowVisibility(isPlaying) {
   }
 }
 
-// Tray lyrics functions
-function parseLRC(content) {
-  if (!content) return [];
-  const lines = content.split('\n');
-  const lyrics = [];
-  for (const line of lines) {
-    const match = line.match(/^\[(\d{2}):(\d{2})\.(\d{2})\](.*)$/);
-    if (match) {
-      const [, minutes, seconds, centiseconds, text] = match;
-      const time = parseInt(minutes) * 60 + parseInt(seconds) + parseInt(centiseconds) / 100;
-      lyrics.push({ time, text: text.trim() });
-    }
-  }
-  return lyrics.sort((a, b) => a.time - b.time);
-}
+/**
+ * Tray lyrics IPC handler
+ * Receives current lyrics text from renderer process and displays in system tray
+ * This is the single entry point for tray updates - no state management here
+ */
+function handleTrayLyricsUpdate(text) {
+  if (!tray || !trayLyricsEnabled) return;
 
-function findCurrentLyricIndex(position) {
-  if (currentLyrics.length === 0 || position < 0) return -1;
+  // Truncate to 60 characters with ellipsis
+  const maxLength = 60;
+  const displayText = text.length > maxLength ?
+    text.substring(0, maxLength - 3) + '...' : text;
 
-  for (let i = currentLyrics.length - 1; i >= 0; i--) {
-    if (position >= currentLyrics[i].time) {
-      return i;
-    }
-  }
-  return 0;
-}
-
-function updateTrayLyrics(position) {
-  if (!tray) return;
-
-  if (!trayLyricsEnabled) {
-    if (lastTrayUpdate !== '') {
-      tray.setTitle('');
-      lastTrayUpdate = '';
-    }
-    return;
-  }
-
-  if (currentLyrics.length === 0) {
-    if (lastTrayUpdate !== '') {
-      tray.setTitle('');
-      lastTrayUpdate = '';
-    }
-    return;
-  }
-
-  const adjustedPosition = position + 0.5;
-  const index = findCurrentLyricIndex(adjustedPosition);
-
-  if (index !== currentLyricIndex) {
-    currentLyricIndex = index;
-    if (index >= 0 && currentLyrics[index]) {
-      const text = currentLyrics[index].text;
-      if (text && text !== '') {
-        const maxLength = 60;
-        const displayText = text.length > maxLength ? text.substring(0, maxLength - 3) + '...' : text;
-        if (displayText !== lastTrayUpdate) {
-          tray.setTitle(displayText);
-          lastTrayUpdate = displayText;
-        }
-      }
-    }
-  }
+  tray.setTitle(displayText);
 }
 
 function initCachedScript() {
@@ -435,35 +382,24 @@ async function broadcastMusicUpdate(trackData) {
 
         const mergedMetadata = mergeArtistMetadata(audioDBMetadata, spotifyMetadata);
 
-        // Update tray lyrics
-        if (lyricsData && lyricsData.synced) {
-          currentLyrics = parseLRC(lyricsData.synced);
-          currentLyricIndex = -1;
-        } else {
-          currentLyrics = [];
-          currentLyricIndex = -1;
-          if (tray) tray.setTitle('');
-          lastTrayUpdate = '';
-        }
-
+        // Send data to renderer (renderer manages tray via unified sync)
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('lyrics:update', lyricsData);
           mainWindow.webContents.send('metadata:update', mergedMetadata);
         }
+
+        // Clear tray if no lyrics
+        if (!lyricsData || !lyricsData.synced) {
+          if (tray) tray.setTitle('');
+        }
       }
 
-      // Update tray with current position
-      if (trackData.position !== undefined) {
-        updateTrayLyrics(trackData.position);
-      }
+      // Tray lyrics are now updated by renderer via IPC (unified sync)
 
       handleWindowVisibility(trackData.isPlaying);
     } else if (currentTrackKey) {
       currentTrackKey = null;
-      currentLyrics = [];
-      currentLyricIndex = -1;
       if (tray) tray.setTitle('');
-      lastTrayUpdate = '';
       mainWindow.webContents.send('lyrics:update', null);
       mainWindow.webContents.send('metadata:update', null);
       handleWindowVisibility(false);
@@ -749,6 +685,11 @@ ipcMain.on('app:quit', () => {
   }
   app.isQuitting = true;
   app.quit();
+});
+
+// Tray lyrics IPC handler (unified sync from renderer)
+ipcMain.on('tray:update-lyrics', (_event, text) => {
+  handleTrayLyricsUpdate(text);
 });
 
 ipcMain.on('open:external', (_event, url) => {

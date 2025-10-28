@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('musicAPI', {
   onMetadataUpdate: (callback) => {
     ipcRenderer.on('metadata:update', (_event, payload) => callback(payload));
   },
+  updateTrayLyrics: (text) => {
+    ipcRenderer.send('tray:update-lyrics', text);
+  },
   quit: () => {
     ipcRenderer.send('app:quit');
   },
