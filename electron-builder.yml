@@ -26,7 +26,7 @@ mac:
       arch:
         - arm64
         - x64
-  artifactName: ${productName}.${ext}
+  artifactName: ${productName}-${arch}.${ext}
   hardenedRuntime: true
   gatekeeperAssess: false
   identity: null
@@ -40,13 +40,13 @@ dmg:
   icon: build/icon.icns
   background: build/dmg-background.png
   contents:
-    - x: 130
-      y: 220
-    - x: 410
-      y: 220
+    - x: 165
+      y: 195
+    - x: 465
+      y: 195
       type: link
       path: /Applications
   window:
-    width: 540
-    height: 380
+    width: 660
+    height: 440
   writeUpdateInfo: false

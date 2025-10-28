@@ -699,11 +699,13 @@ class MetadataHandler {
       this.navigateCarousel(1);
     });
 
-    this.elements.modalClose.addEventListener('click', () => {
+    this.elements.modalClose.addEventListener('click', (e) => {
+      e.stopPropagation();
       this.closeModal();
     });
 
-    this.elements.modalDownload.addEventListener('click', () => {
+    this.elements.modalDownload.addEventListener('click', (e) => {
+      e.stopPropagation();
       this.downloadImage();
     });
 
@@ -1092,9 +1094,27 @@ class MetadataHandler {
 
   downloadImage() {
     const imageUrl = this.elements.modalImage.src;
+
+    // Create safe filename from artist and track names
+    const artist = currentMusicData?.artist || 'Unknown';
+    const track = currentMusicData?.title || 'Unknown';
+
+    // Sanitize filename: remove/replace unsafe characters
+    const sanitize = (str) => str
+      .replace(/[<>:"/\\|?*]/g, '') // Remove invalid filename chars
+      .replace(/\s+/g, '_')          // Replace spaces with underscores
+      .replace(/_{2,}/g, '_')        // Replace multiple underscores with single
+      .replace(/^_|_$/g, '')         // Remove leading/trailing underscores
+      .substring(0, 100);            // Limit length
+
+    const safeArtist = sanitize(artist);
+    const safeTrack = sanitize(track);
+    const extension = imageUrl.includes('.png') ? 'png' : 'jpg';
+    const filename = `${safeArtist}_-_${safeTrack}.${extension}`;
+
     const link = document.createElement('a');
     link.href = imageUrl;
-    link.download = 'artist-image.jpg';
+    link.download = filename;
     link.target = '_blank';
     document.body.appendChild(link);
     link.click();
@@ -1399,7 +1419,7 @@ class SettingsHandler {
           <div class="cache-item-title">${title}</div>
           <div class="cache-item-meta">${sizeMB} MB • ${date}</div>
         </div>
-        <button class="cache-item-delete" data-type="${entry.type}" data-key="${entry.key}">×</button>
+        <button class="icon-btn icon-btn-danger cache-item-delete" data-type="${entry.type}" data-key="${entry.key}" title="Delete">×</button>
       `;
 
       const deleteBtn = item.querySelector('.cache-item-delete');

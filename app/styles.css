@@ -35,12 +35,18 @@
   --font-xl: 16px;
 
   --color-primary: #00ff9f;
+  --color-success: #00ff9f;
   --color-secondary: #00b8ff;
   --color-danger: #ff3b30;
   --color-bg: rgba(20, 20, 20, 0.95);
   --color-text: rgba(255, 255, 255, 0.95);
   --color-text-dim: rgba(255, 255, 255, 0.6);
   --color-border: rgba(255, 255, 255, 0.1);
+
+  /* Icon button sizes */
+  --icon-btn-sm: 32px;
+  --icon-btn-md: 40px;
+  --icon-btn-lg: 48px;
 }
 
 * {
@@ -88,51 +94,177 @@ body {
   display: none;
 }
 
+/* ==========================================
+   UNIVERSAL ICON BUTTON SYSTEM
+   ==========================================
+
+   A unified, reusable icon button system for all circular action buttons.
+
+   USAGE:
+   ------
+   Basic usage: <button class="icon-btn">×</button>
+
+   With size:   <button class="icon-btn icon-btn-md">×</button>
+   With color:  <button class="icon-btn icon-btn-danger">×</button>
+   Combined:    <button class="icon-btn icon-btn-md icon-btn-success">✓</button>
+
+   SIZES:
+   ------
+   .icon-btn-sm  (32px) - Default, for small buttons (header, inline)
+   .icon-btn-md  (40px) - Medium, for modal actions
+   .icon-btn-lg  (48px) - Large, for prominent actions
+
+   COLORS:
+   -------
+   (default)           - Neutral gray background
+   .icon-btn-danger    - Red for destructive actions (close, delete)
+   .icon-btn-success   - Green for positive actions (download, save, confirm)
+   .icon-btn-primary   - Blue for primary actions
+
+   EXAMPLES IN APP:
+   ----------------
+   - Header buttons (settings, quit): .icon-btn .icon-btn-sm
+   - Modal close buttons: .icon-btn .icon-btn-md .icon-btn-danger
+   - Download button: .icon-btn .icon-btn-md .icon-btn-success
+   - Cache delete: .icon-btn .icon-btn-danger
+
+   FEATURES:
+   ---------
+   ✓ Consistent sizing and spacing
+   ✓ Better clickability with larger hit areas
+   ✓ Smooth hover/active animations
+   ✓ Backdrop blur for modern glass effect
+   ✓ SVG icon support with automatic sizing
+   ✓ High contrast on hover
+   ✓ Accessibility tooltips via title attribute
+
+   ========================================== */
+
+/* Base icon button - use this for all circular icon buttons */
+.icon-btn {
+  width: var(--icon-btn-sm);
+  height: var(--icon-btn-sm);
+  min-width: var(--icon-btn-sm);
+  min-height: var(--icon-btn-sm);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  -webkit-app-region: no-drag;
+  padding: 0;
+  outline: none;
+  position: relative;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.4);
+  transform: scale(1.1);
+}
+
+.icon-btn:active {
+  transform: scale(0.95);
+}
+
+/* Size variants */
+.icon-btn-sm {
+  width: var(--icon-btn-sm);
+  height: var(--icon-btn-sm);
+  min-width: var(--icon-btn-sm);
+  min-height: var(--icon-btn-sm);
+  font-size: 18px;
+}
+
+.icon-btn-md {
+  width: var(--icon-btn-md);
+  height: var(--icon-btn-md);
+  min-width: var(--icon-btn-md);
+  min-height: var(--icon-btn-md);
+  font-size: 20px;
+}
+
+.icon-btn-lg {
+  width: var(--icon-btn-lg);
+  height: var(--icon-btn-lg);
+  min-width: var(--icon-btn-lg);
+  min-height: var(--icon-btn-lg);
+  font-size: 24px;
+}
+
+/* Color variants */
+.icon-btn-danger {
+  background: rgba(255, 59, 48, 0.15);
+  border-color: rgba(255, 59, 48, 0.3);
+  color: var(--color-danger);
+}
+
+.icon-btn-danger:hover {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: white;
+}
+
+.icon-btn-success {
+  background: rgba(0, 255, 159, 0.15);
+  border-color: rgba(0, 255, 159, 0.3);
+  color: var(--color-success);
+}
+
+.icon-btn-success:hover {
+  background: var(--color-success);
+  border-color: var(--color-success);
+  color: rgba(20, 20, 20, 0.95);
+}
+
+.icon-btn-primary {
+  background: rgba(0, 184, 255, 0.15);
+  border-color: rgba(0, 184, 255, 0.3);
+  color: var(--color-secondary);
+}
+
+.icon-btn-primary:hover {
+  background: var(--color-secondary);
+  border-color: var(--color-secondary);
+  color: white;
+}
+
+/* SVG icons inside buttons */
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+
+.icon-btn-md svg {
+  width: 18px;
+  height: 18px;
+}
+
+.icon-btn-lg svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ========================================== */
+
 .header-buttons {
   position: absolute;
   top: 8px;
   right: 8px;
   display: flex;
-  gap: 6px;
+  gap: 8px;
   z-index: 1000;
   -webkit-app-region: no-drag;
 }
 
-.btn-settings,
-.btn-close {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  -webkit-app-region: no-drag;
-  backdrop-filter: blur(10px);
-}
-
-.btn-close {
-  font-size: 20px;
-  font-weight: 300;
-}
-
-.btn-settings:hover,
-.btn-close:hover {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.4);
-  color: #ffffff;
-  transform: scale(1.1);
-}
-
-.btn-close:hover {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
-}
 
 .player-content {
   display: flex;
@@ -811,52 +943,16 @@ body.no-music .track-title {
   border-radius: var(--radius-lg);
 }
 
-.modal-close {
+/* Modal action buttons container - top right */
+.modal-actions {
   position: absolute;
   top: 16px;
   right: 16px;
-  width: 32px;
-  height: 32px;
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.9);
-  border-radius: 50%;
-  font-size: 20px;
-  cursor: pointer;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  backdrop-filter: blur(10px);
+  gap: 10px;
+  z-index: 10;
 }
 
-.modal-close:hover {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
-  color: white;
-  transform: scale(1.1);
-}
-
-.modal-download {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 10px 20px;
-  background: linear-gradient(135deg, rgba(0, 255, 159, 0.2), rgba(0, 184, 255, 0.2));
-  border: 1px solid rgba(0, 255, 159, 0.3);
-  color: rgba(255, 255, 255, 0.9);
-  border-radius: var(--radius-md);
-  font-size: var(--font-md);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  backdrop-filter: blur(10px);
-}
-
-.modal-download:hover {
-  background: linear-gradient(135deg, rgba(0, 255, 159, 0.3), rgba(0, 184, 255, 0.3));
-  transform: translateX(-50%) scale(1.05);
-}
 
 .settings-modal {
   display: none;
@@ -1321,24 +1417,13 @@ body.no-music .track-title {
   margin-top: 2px;
 }
 
+/* Cache delete button now uses .icon-btn system in renderer.js */
 .cache-item-delete {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: rgba(255, 59, 48, 0.15);
-  border: 1px solid rgba(255, 59, 48, 0.3);
-  color: var(--color-danger);
-  font-size: var(--font-lg);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-
-.cache-item-delete:hover {
-  background: var(--color-danger);
-  color: white;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  font-size: 16px;
 }
 
 .cache-empty {

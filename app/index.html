@@ -10,8 +10,8 @@
 <body>
   <div class="player-widget">
     <div class="header-buttons">
-      <button class="btn-settings" id="settingsBtn">⚙</button>
-      <button class="btn-close" id="closeBtn">×</button>
+      <button class="icon-btn icon-btn-sm btn-settings" id="settingsBtn" title="Settings">⚙</button>
+      <button class="icon-btn icon-btn-sm icon-btn-danger btn-close" id="closeBtn" title="Quit">×</button>
     </div>
 
       <div class="player-content" data-section="player">
@@ -139,8 +139,15 @@
   <div class="image-modal" id="imageModal">
     <div class="modal-content">
       <img class="modal-image" id="modalImage" alt="">
-      <button class="modal-close" id="modalClose">×</button>
-      <button class="modal-download" id="modalDownload">Download</button>
+      <div class="modal-actions">
+        <button class="icon-btn icon-btn-md icon-btn-success modal-download" id="modalDownload" title="Download">
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8.5 1a.5.5 0 0 0-1 0v8.793L4.854 7.146a.5.5 0 1 0-.708.708l3.5 3.5a.5.5 0 0 0 .708 0l3.5-3.5a.5.5 0 0 0-.708-.708L8.5 9.793V1z"/>
+            <path d="M2 12.5a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/>
+          </svg>
+        </button>
+        <button class="icon-btn icon-btn-md icon-btn-danger modal-close" id="modalClose" title="Close">×</button>
+      </div>
     </div>
   </div>
 
@@ -149,7 +156,7 @@
     <div class="settings-content">
       <div class="settings-header">
         <h2>Settings</h2>
-        <button class="modal-close" id="settingsClose">×</button>
+        <button class="icon-btn icon-btn-sm icon-btn-danger modal-close" id="settingsClose" title="Close">×</button>
       </div>
 
       <div class="settings-main">
@@ -344,7 +351,7 @@
   <!-- Full Lyrics Modal -->
   <div class="full-lyrics-modal" id="fullLyricsModal">
     <div class="full-lyrics-content">
-      <button class="modal-close" id="fullLyricsClose">×</button>
+      <button class="icon-btn icon-btn-md icon-btn-danger modal-close" id="fullLyricsClose" title="Close">×</button>
       <div class="full-lyrics-body" id="fullLyricsBody">
         <div class="full-lyrics-text" id="fullLyricsText"></div>
       </div>
