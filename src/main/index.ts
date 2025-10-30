@@ -13,7 +13,8 @@ import {
   Tray,
   Menu,
   globalShortcut,
-  screen
+  screen,
+  dialog
 } from 'electron';
 import { exec } from 'child_process';
 import path from 'path';
@@ -26,6 +27,7 @@ import TheAudioDBManager from './managers/TheAudioDBManager';
 import ImageCacheManager from './managers/ImageCacheManager';
 import SpotifyAuth from './auth/SpotifyAuth';
 import SpotifyMetadataManager from './managers/SpotifyMetadataManager';
+import UpdateManager from './managers/UpdateManager';
 
 // Type definitions
 interface Config {
@@ -765,6 +767,17 @@ function updateTrayMenu(): void {
         }
       }
     },
+    {
+      label: 'Check for Updates',
+      click: async () => {
+        try {
+          const updateInfo = await UpdateManager.checkForUpdates();
+          await UpdateManager.showUpdateDialog(updateInfo);
+        } catch (error) {
+          dialog.showErrorBox('Update Check Failed', 'Could not check for updates. Please try again later.');
+        }
+      }
+    },
     { type: 'separator' },
     {
       label: 'Quit',
@@ -1110,6 +1123,16 @@ ipcMain.handle('settings:get-tray-lyrics', () => {
 ipcMain.handle('settings:set-tray-lyrics', (_event, enabled: boolean) => {
   saveTrayLyricsSetting(enabled);
   return true;
+});
+
+// Update check IPC handler
+ipcMain.handle('update:check', async () => {
+  try {
+    return await UpdateManager.checkForUpdates();
+  } catch (error) {
+    Logger.app.error('Update check failed', error as Error);
+    throw error;
+  }
 });
 
 ipcMain.handle('logs:get-stats', async () => {
