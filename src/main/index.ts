@@ -105,12 +105,23 @@ let currentPollInterval = 1000;
 
 // Window behavior management
 let autoHideEnabled = false; // false = always show (default), true = show only when playing
+let windowEnabled = true; // Master switch for window visibility (default: enabled)
 let manualOverride = false;
 let hideTimeout: NodeJS.Timeout | null = null;
 let settingsStore: Store | null = null;
 
 // Tray lyrics setting
 let trayLyricsEnabled = true; // Show lyrics in system tray (default: enabled)
+
+// Lyrics sync state (managed in main process for independent tray updates)
+let currentLyrics: Array<{ time: number; text: string }> = [];
+let currentLyricIndex = 0;
+let lyricsSyncInterval: NodeJS.Timeout | null = null;
+
+// Internal position tracking (for accurate tray sync)
+let internalPosition = 0;
+let lastPositionUpdate = Date.now();
+let isInternalPlaying = false;
 
 // Register custom protocol for OAuth callback (must be before app.whenReady)
 if (process.defaultApp) {
@@ -129,17 +140,30 @@ async function getSettingsStore(): Promise<Store> {
     const StoreModule = await import('electron-store');
     settingsStore = new StoreModule.default();
     autoHideEnabled = settingsStore.get('autoHideEnabled', false) as boolean;
+    windowEnabled = settingsStore.get('windowEnabled', true) as boolean;
     trayLyricsEnabled = settingsStore.get('trayLyricsEnabled', true) as boolean;
   }
   return settingsStore;
 }
 
-function saveAutoHideSetting(enabled: boolean): void {
-  autoHideEnabled = enabled;
+function saveWindowEnabledSetting(enabled: boolean): void {
+  windowEnabled = enabled;
   if (settingsStore) {
-    settingsStore.set('autoHideEnabled', enabled);
+    settingsStore.set('windowEnabled', enabled);
   }
-  Logger.app.info(`Auto-hide ${enabled ? 'enabled' : 'disabled'}`);
+
+  // Immediately apply window state
+  if (!enabled) {
+    // User disabled window - hide it
+    hideWindow();
+  } else {
+    // User enabled window - show based on current music state
+    if (lastTrackData) {
+      handleWindowVisibility(lastTrackData.isPlaying);
+    }
+  }
+
+  Logger.app.info(`Window ${enabled ? 'enabled' : 'disabled'}`);
 }
 
 function saveTrayLyricsSetting(enabled: boolean): void {
@@ -148,9 +172,17 @@ function saveTrayLyricsSetting(enabled: boolean): void {
     settingsStore.set('trayLyricsEnabled', enabled);
   }
 
-  // Clear tray immediately if disabled
-  if (!enabled && tray) {
-    tray.setTitle('');
+  // Clear tray immediately if disabled, restart sync if enabled
+  if (!enabled) {
+    if (tray) tray.setTitle('');
+  } else {
+    // Re-sync current line if we have lyrics
+    if (currentLyrics.length > 0 && currentLyricIndex < currentLyrics.length) {
+      const currentLine = currentLyrics[currentLyricIndex];
+      if (currentLine) {
+        updateTrayLyrics(currentLine.text);
+      }
+    }
   }
 
   Logger.app.info(`Tray lyrics ${enabled ? 'enabled' : 'disabled'}`);
@@ -158,6 +190,8 @@ function saveTrayLyricsSetting(enabled: boolean): void {
 
 // Window visibility control
 function showWindow(shouldFocus: boolean = false): void {
+  if (!windowEnabled) return; // Don't show if window is disabled by user
+
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     if (shouldFocus) {
@@ -169,22 +203,6 @@ function showWindow(shouldFocus: boolean = false): void {
 function hideWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.hide();
-  }
-}
-
-function toggleWindow(): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isVisible()) {
-      manualOverride = true;
-      hideWindow();
-      updateTrayMenu();
-      Logger.app.debug('Window hidden by user (manual override enabled)');
-    } else {
-      manualOverride = false;
-      showWindow(true); // User action: focus the window
-      updateTrayMenu();
-      Logger.app.debug('Window shown by user (manual override disabled)');
-    }
   }
 }
 
@@ -203,6 +221,14 @@ function handleTrayClick(): void {
 
 function handleWindowVisibility(isPlaying: boolean): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  // If window is disabled by user, always keep it hidden
+  if (!windowEnabled) {
+    if (mainWindow.isVisible()) {
+      hideWindow();
+    }
+    return;
+  }
 
   if (hideTimeout) clearTimeout(hideTimeout);
 
@@ -229,11 +255,153 @@ function handleWindowVisibility(isPlaying: boolean): void {
 }
 
 /**
- * Tray lyrics IPC handler
- * Receives current lyrics text from renderer process and displays in system tray
- * This is the single entry point for tray updates - no state management here
+ * Parse synced lyrics text into time-stamped lines
  */
-function handleTrayLyricsUpdate(text: string): void {
+function parseSyncedLyrics(syncedText: string): Array<{ time: number; text: string }> {
+  const lines: Array<{ time: number; text: string }> = [];
+  const lrcLines = syncedText.split('\n');
+
+  for (const line of lrcLines) {
+    const match = line.match(/\[(\d+):(\d+\.\d+)\](.*)/);
+    if (match && match[1] && match[2] && match[3] !== undefined) {
+      const minutes = parseInt(match[1]);
+      const seconds = parseFloat(match[2]);
+      const text = match[3].trim();
+      const time = minutes * 60 + seconds;
+
+      if (text) { // Only add non-empty lyrics
+        lines.push({ time, text });
+      }
+    }
+  }
+
+  return lines.sort((a, b) => a.time - b.time);
+}
+
+/**
+ * Calculate current position based on elapsed time (accurate like renderer)
+ */
+function getCurrentPosition(): number {
+  if (!isInternalPlaying || !lastTrackData) {
+    return internalPosition;
+  }
+
+  const now = Date.now();
+  const elapsed = (now - lastPositionUpdate) / 1000;
+  const calculatedPosition = internalPosition + elapsed;
+
+  // Cap at track duration
+  if (lastTrackData.duration && calculatedPosition > lastTrackData.duration) {
+    return lastTrackData.duration;
+  }
+
+  return calculatedPosition;
+}
+
+/**
+ * Update internal position from polling data
+ */
+function updateInternalPosition(position: number, isPlaying: boolean): void {
+  // Detect if position jumped significantly (seek or track change)
+  const positionDiff = Math.abs(position - internalPosition);
+  const needsHardSync = positionDiff > 1.0 || internalPosition === 0;
+
+  if (needsHardSync) {
+    internalPosition = position;
+  }
+
+  isInternalPlaying = isPlaying;
+  lastPositionUpdate = Date.now();
+}
+
+/**
+ * Start lyrics sync loop (main process manages tray independently)
+ */
+function startLyricsSync(lyricsData: any): void {
+  // Stop existing sync
+  stopLyricsSync();
+
+  // Parse synced lyrics
+  if (lyricsData && lyricsData.synced) {
+    currentLyrics = parseSyncedLyrics(lyricsData.synced);
+    currentLyricIndex = 0;
+
+    // Immediately show the correct line for current position (atomic sync with window)
+    if (currentLyrics.length > 0) {
+      const position = getCurrentPosition();
+
+      // Find current line (same logic as interval)
+      let initialIndex = 0;
+      while (initialIndex < currentLyrics.length - 1) {
+        const nextLine = currentLyrics[initialIndex + 1];
+        if (!nextLine || nextLine.time > position) break;
+        initialIndex++;
+      }
+
+      currentLyricIndex = initialIndex;
+      const currentLine = currentLyrics[currentLyricIndex];
+      if (currentLine) {
+        updateTrayLyrics(currentLine.text);
+      }
+    }
+
+    // Start sync interval (100ms for smooth updates, using calculated position)
+    lyricsSyncInterval = setInterval(() => {
+      if (!isInternalPlaying) return;
+
+      // Use time-based calculated position (not polling position)
+      const position = getCurrentPosition();
+
+      // Find current lyric line based on position
+      let newIndex = currentLyricIndex;
+
+      // Search forward
+      while (newIndex < currentLyrics.length - 1) {
+        const nextLine = currentLyrics[newIndex + 1];
+        if (!nextLine || nextLine.time > position) break;
+        newIndex++;
+      }
+
+      // Search backward (in case of seek)
+      while (newIndex > 0) {
+        const currentLine = currentLyrics[newIndex];
+        if (!currentLine || currentLine.time <= position) break;
+        newIndex--;
+      }
+
+      // Update tray if line changed
+      if (newIndex !== currentLyricIndex) {
+        currentLyricIndex = newIndex;
+        const currentLine = currentLyrics[currentLyricIndex];
+        if (currentLine) {
+          updateTrayLyrics(currentLine.text);
+        }
+      }
+    }, 100);
+
+    Logger.app.debug('Lyrics sync started in main process');
+  }
+}
+
+/**
+ * Stop lyrics sync loop
+ */
+function stopLyricsSync(): void {
+  if (lyricsSyncInterval) {
+    clearInterval(lyricsSyncInterval);
+    lyricsSyncInterval = null;
+  }
+  currentLyrics = [];
+  currentLyricIndex = 0;
+  internalPosition = 0;
+  isInternalPlaying = false;
+  lastPositionUpdate = Date.now();
+}
+
+/**
+ * Update tray with lyrics text (main process single source of truth)
+ */
+function updateTrayLyrics(text: string): void {
   if (!tray || !trayLyricsEnabled) return;
 
   // Truncate to 60 characters with ellipsis
@@ -242,6 +410,17 @@ function handleTrayLyricsUpdate(text: string): void {
     text.length > maxLength ? text.substring(0, maxLength - 3) + '...' : text;
 
   tray.setTitle(displayText);
+}
+
+/**
+ * Legacy IPC handler (kept for backward compatibility with renderer)
+ * Main process now manages tray directly, but renderer can still send updates
+ */
+function handleTrayLyricsUpdate(text: string): void {
+  // Only accept renderer updates if main sync is not active
+  if (lyricsSyncInterval) return; // Main process is handling it
+
+  updateTrayLyrics(text);
 }
 
 function initCachedScript(): void {
@@ -429,6 +608,11 @@ async function broadcastMusicUpdate(trackData: TrackData | null): Promise<void> 
         manualOverride = false; // Reset on new track
         Logger.music.info(`Now playing: ${trackData.artist} - ${trackData.title}`);
 
+        // Reset internal position on track change
+        internalPosition = trackData.position;
+        isInternalPlaying = trackData.isPlaying;
+        lastPositionUpdate = Date.now();
+
         const [lyricsData, audioDBMetadata, spotifyMetadata] = await Promise.all([
           lyricsManager.fetchLyrics(trackData.title, trackData.artist),
           audioDBManager.fetchMetadata(trackData.artist),
@@ -439,23 +623,28 @@ async function broadcastMusicUpdate(trackData: TrackData | null): Promise<void> 
 
         const mergedMetadata = mergeArtistMetadata(audioDBMetadata, spotifyMetadata);
 
-        // Send data to renderer (renderer manages tray via unified sync)
+        // Send data to renderer for window display
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('lyrics:update', lyricsData);
           mainWindow.webContents.send('metadata:update', mergedMetadata);
         }
 
-        // Clear tray if no lyrics
-        if (!lyricsData || !lyricsData.synced) {
+        // Main process manages tray lyrics sync independently
+        if (lyricsData && lyricsData.synced) {
+          startLyricsSync(lyricsData);
+        } else {
+          stopLyricsSync();
           if (tray) tray.setTitle('');
         }
+      } else {
+        // Same track - update position smoothly
+        updateInternalPosition(trackData.position, trackData.isPlaying);
       }
-
-      // Tray lyrics are now updated by renderer via IPC (unified sync)
 
       handleWindowVisibility(trackData.isPlaying);
     } else if (currentTrackKey) {
       currentTrackKey = null;
+      stopLyricsSync();
       if (tray) tray.setTitle('');
       mainWindow.webContents.send('lyrics:update', null);
       mainWindow.webContents.send('metadata:update', null);
@@ -534,8 +723,6 @@ function mergeArtistMetadata(audioDBData: any, spotifyData: any): MergedMetadata
 function updateTrayMenu(): void {
   if (!tray) return;
 
-  const isVisible = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
-
   const contextMenu = Menu.buildFromTemplate([
     {
       label: 'LyricGlow',
@@ -543,44 +730,38 @@ function updateTrayMenu(): void {
     },
     { type: 'separator' },
     {
-      label: isVisible ? 'Hide Window' : 'Show Window',
-      accelerator: 'CommandOrControl+L',
-      click: () => toggleWindow()
+      label: 'Show Window',
+      type: 'checkbox',
+      checked: windowEnabled,
+      click: () => {
+        saveWindowEnabledSetting(!windowEnabled);
+        updateTrayMenu();
+      }
     },
-    { type: 'separator' },
     {
-      label: 'Window Behavior',
-      submenu: [
-        {
-          label: 'Always Show',
-          type: 'radio',
-          checked: !autoHideEnabled,
-          click: () => {
-            saveAutoHideSetting(false);
-            manualOverride = false;
-            showWindow(false); // Don't steal focus from user's current app
-            updateTrayMenu();
-          }
-        },
-        {
-          label: 'Show Only When Playing',
-          type: 'radio',
-          checked: autoHideEnabled,
-          click: () => {
-            saveAutoHideSetting(true);
-            manualOverride = false;
-            updateTrayMenu();
-          }
-        }
-      ]
+      label: 'Show Tray Lyrics',
+      type: 'checkbox',
+      checked: trayLyricsEnabled,
+      click: () => {
+        saveTrayLyricsSetting(!trayLyricsEnabled);
+        updateTrayMenu();
+      }
     },
     { type: 'separator' },
     {
       label: 'Settings',
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
+          // Temporarily enable window to show settings
+          const wasDisabled = !windowEnabled;
+          if (wasDisabled) {
+            windowEnabled = true;
+          }
           showWindow(true); // User action: show and focus
           mainWindow.webContents.send('open-settings');
+          if (wasDisabled) {
+            windowEnabled = false; // Restore state but keep window visible for settings
+          }
         }
       }
     },
@@ -664,9 +845,10 @@ function createWindow(): void {
   mainWindow.on('close', (event) => {
     if (!(app as any).isQuitting) {
       event.preventDefault();
-      manualOverride = true;
-      hideWindow();
+      // Act like user unchecked "Show Window" in tray menu
+      saveWindowEnabledSetting(false);
       updateTrayMenu();
+      Logger.app.debug('Window closed by user (Show Window disabled)');
     }
   });
 
@@ -704,13 +886,15 @@ app.on('open-url', async (event, url) => {
 app.whenReady().then(async () => {
   Logger.app.info('App ready, initializing...');
 
-  // Initialize settings store and load auto-hide setting
+  // Initialize settings store and load settings
   await getSettingsStore();
+  Logger.app.info(`Window: ${windowEnabled ? 'enabled' : 'disabled'}`);
   Logger.app.info(`Auto-hide mode: ${autoHideEnabled ? 'enabled' : 'disabled'}`);
+  Logger.app.info(`Tray lyrics: ${trayLyricsEnabled ? 'enabled' : 'disabled'}`);
 
-  // Register global hotkey
+  // Register global hotkey to toggle window enabled setting
   const hotkeyRegistered = globalShortcut.register('CommandOrControl+L', () => {
-    toggleWindow();
+    saveWindowEnabledSetting(!windowEnabled);
     updateTrayMenu();
   });
 
@@ -750,6 +934,13 @@ ipcMain.on('open:external', (_event, url: string) => {
   if (url && typeof url === 'string') {
     shell.openExternal(url);
   }
+});
+
+// Window close IPC handler (hide window, don't quit)
+ipcMain.on('window:close', () => {
+  saveWindowEnabledSetting(false);
+  updateTrayMenu();
+  Logger.app.debug('Window closed by user via close button (Show Window disabled)');
 });
 
 function executeMediaControl(command: string, param: number | null = null): void {
@@ -942,6 +1133,7 @@ app.on('before-quit', () => {
   if (pollInterval) {
     clearInterval(pollInterval);
   }
+  stopLyricsSync(); // Clean up lyrics sync interval
   if (cachedScriptPath) {
     try {
       fs.unlinkSync(cachedScriptPath);

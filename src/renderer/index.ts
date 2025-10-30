@@ -111,6 +111,7 @@ declare global {
       onMetadataUpdate: (callback: (payload: Metadata) => void) => void;
       updateTrayLyrics: (text: string) => void;
       quit: () => void;
+      closeWindow: () => void;
       openExternal: (url: string) => void;
       cacheImage: (url: string) => Promise<string | null>;
       seek: (position: number) => void;
@@ -236,13 +237,15 @@ function updatePlayPauseButton(isPlaying: boolean): void {
  * LyricsSyncManager: Single source of truth for lyrics state
  *
  * This class manages all lyrics state and coordinates atomic updates
- * across all three display locations (main app, modal, system tray).
+ * across display locations (main app window, full lyrics modal).
  *
  * Design principles:
  * - Single source of truth: All lyrics state lives here
  * - Atomic broadcast: All displays update simultaneously from same data
  * - No duplication: Logic exists in one place only
  * - Pure consumers: Display components are stateless UI renderers
+ *
+ * NOTE: Tray lyrics are now managed independently by main process
  */
 class LyricsSyncManager {
   lyrics: LyricLine[];
@@ -252,9 +255,6 @@ class LyricsSyncManager {
   state: 'empty' | 'loading' | 'unavailable' | 'instrumental' | 'ready';
   mainDisplay: LyricsMainDisplay | null;
   modalDisplay: FullLyricsModalDisplay | null;
-  lastTrayUpdate: number;
-  lastTrayText: string;
-  trayUpdateInterval: number;
 
   constructor() {
     // Single source of truth for lyrics state
@@ -267,11 +267,6 @@ class LyricsSyncManager {
     // Display references (injected after construction)
     this.mainDisplay = null;
     this.modalDisplay = null;
-
-    // Performance optimization: throttle tray updates
-    this.lastTrayUpdate = 0;
-    this.lastTrayText = '';
-    this.trayUpdateInterval = 100; // 100ms for tray (smoother than 500ms)
   }
 
   /**
@@ -404,8 +399,8 @@ class LyricsSyncManager {
       this.modalDisplay.updateCurrent(syncData);
     }
 
-    // 3. Update system tray (throttled to 100ms)
-    this.updateTray(currentLine.text);
+    // NOTE: Tray lyrics now managed by main process independently
+    // Renderer only handles window display (no tray IPC)
   }
 
   /**
@@ -420,29 +415,7 @@ class LyricsSyncManager {
       this.modalDisplay.setState(this.state);
     }
 
-    // Clear tray for non-ready states
-    if (this.state !== 'ready') {
-      window.musicAPI.updateTrayLyrics('');
-    }
-  }
-
-  /**
-   * Update system tray with throttling (100ms) to prevent excessive IPC
-   */
-  updateTray(text: string): void {
-    const now = Date.now();
-
-    // Throttle: only update every 100ms
-    if (now - this.lastTrayUpdate < this.trayUpdateInterval) return;
-
-    // Skip if text hasn't changed
-    if (text === this.lastTrayText) return;
-
-    this.lastTrayUpdate = now;
-    this.lastTrayText = text;
-
-    // Send to main process via IPC
-    window.musicAPI.updateTrayLyrics(text);
+    // NOTE: Tray clearing handled by main process
   }
 
   /**
@@ -470,7 +443,6 @@ class LyricsSyncManager {
     this.currentIndex = -1;
     this.currentPosition = 0;
     this.isRTL = false;
-    this.lastTrayText = '';
     this.state = 'empty';
   }
 }
@@ -2108,7 +2080,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (elements.closeBtn) {
     elements.closeBtn.addEventListener('click', () => {
-      window.musicAPI.quit();
+      window.musicAPI.closeWindow();
     });
   }
 

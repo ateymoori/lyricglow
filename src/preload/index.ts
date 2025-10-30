@@ -17,6 +17,7 @@ interface MusicAPI {
 
   // App control
   quit: () => void;
+  closeWindow: () => void;
   openExternal: (url: string) => void;
 
   // Cache
@@ -82,6 +83,9 @@ const musicAPI: MusicAPI = {
   // App control
   quit: () => {
     ipcRenderer.send('app:quit');
+  },
+  closeWindow: () => {
+    ipcRenderer.send('window:close');
   },
   openExternal: (url: string) => {
     ipcRenderer.send('open:external', url);
