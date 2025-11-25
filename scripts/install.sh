@@ -79,7 +79,28 @@ if [[ -z "$LATEST_TAG" ]]; then
 fi
 
 VERSION="${LATEST_TAG#v}"
-echo -e "${GREEN}*${NC} Latest version: ${BOLD}$VERSION${NC}"
+
+# Check if already installed and get current version
+CURRENT_VERSION=""
+if [[ -d "$INSTALL_DIR/$APP_NAME.app" ]]; then
+    CURRENT_VERSION=$(defaults read "$INSTALL_DIR/$APP_NAME.app/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo "")
+fi
+
+# Compare versions
+if [[ -n "$CURRENT_VERSION" ]]; then
+    if [[ "$CURRENT_VERSION" == "$VERSION" ]]; then
+        echo -e "${GREEN}*${NC} Already up to date: ${BOLD}v$VERSION${NC}"
+        echo ""
+        echo -e "LyricGlow is already at the latest version."
+        echo -e "To reinstall, first remove: ${BOLD}rm -rf /Applications/LyricGlow.app${NC}"
+        echo ""
+        exit 0
+    else
+        echo -e "${YELLOW}*${NC} Installed: v$CURRENT_VERSION → Latest: ${BOLD}v$VERSION${NC}"
+    fi
+else
+    echo -e "${GREEN}*${NC} Latest version: ${BOLD}v$VERSION${NC}"
+fi
 
 # Build download URL
 DMG_NAME="${APP_NAME}-${DMG_ARCH}.dmg"
@@ -125,9 +146,9 @@ if [[ -z "$MOUNT_POINT" ]] || [[ ! -d "$MOUNT_POINT" ]]; then
 fi
 echo -e "${GREEN}*${NC} Mounted"
 
-# Check if app already exists
+# Check if app already exists and remove old version
 if [[ -d "$INSTALL_DIR/$APP_NAME.app" ]]; then
-    echo -e "${YELLOW}*${NC} Removing previous installation..."
+    echo -e "${YELLOW}*${NC} Upgrading from v$CURRENT_VERSION..."
     rm -rf "$INSTALL_DIR/$APP_NAME.app"
 fi
 
@@ -157,10 +178,15 @@ hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
 # Success message
 echo ""
 echo -e "${GREEN}${BOLD}================================================${NC}"
-echo -e "${GREEN}${BOLD}   LyricGlow $VERSION installed successfully!${NC}"
+if [[ -n "$CURRENT_VERSION" ]]; then
+    echo -e "${GREEN}${BOLD}   LyricGlow upgraded: v$CURRENT_VERSION → v$VERSION${NC}"
+else
+    echo -e "${GREEN}${BOLD}   LyricGlow v$VERSION installed successfully!${NC}"
+fi
 echo -e "${GREEN}${BOLD}================================================${NC}"
 echo ""
 echo -e "Location: ${BOLD}$INSTALL_DIR/$APP_NAME.app${NC}"
+echo -e "Settings: ${BOLD}Preserved${NC} (stored separately)"
 echo ""
 
 # Launch the app automatically (non-interactive install)
