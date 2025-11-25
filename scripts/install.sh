@@ -70,7 +70,7 @@ if [[ -z "$RELEASE_INFO" ]]; then
     exit 1
 fi
 
-LATEST_TAG=$(echo "$RELEASE_INFO" | grep '"tag_name":' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+LATEST_TAG=$(echo "$RELEASE_INFO" | grep '"tag_name":' | sed -n '1p' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
 
 if [[ -z "$LATEST_TAG" ]]; then
     echo -e "${RED}Error: Could not find latest release${NC}"
