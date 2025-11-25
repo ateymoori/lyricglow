@@ -88,11 +88,11 @@ DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_TAG/$DMG_NAME"
 # Create temporary directory
 TEMP_DIR=$(mktemp -d)
 DMG_PATH="$TEMP_DIR/$DMG_NAME"
-MOUNT_POINT="/Volumes/$APP_NAME"
+MOUNT_POINT=""
 
 # Cleanup function
 cleanup() {
-    if [[ -d "$MOUNT_POINT" ]]; then
+    if [[ -n "$MOUNT_POINT" ]] && [[ -d "$MOUNT_POINT" ]]; then
         hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
     fi
     rm -rf "$TEMP_DIR" 2>/dev/null || true
@@ -108,16 +108,19 @@ if ! curl -fSL --progress-bar -o "$DMG_PATH" "$DOWNLOAD_URL"; then
 fi
 echo -e "${GREEN}*${NC} Download complete"
 
-# Mount DMG
+# Mount DMG and capture mount point
 echo -e "${BLUE}*${NC} Mounting disk image..."
-if ! hdiutil attach "$DMG_PATH" -nobrowse -quiet 2>/dev/null; then
+MOUNT_OUTPUT=$(hdiutil attach "$DMG_PATH" -nobrowse 2>&1)
+if [[ $? -ne 0 ]]; then
     echo -e "${RED}Error: Failed to mount disk image${NC}"
     exit 1
 fi
 
-# Check if mount succeeded
-if [[ ! -d "$MOUNT_POINT" ]]; then
-    echo -e "${RED}Error: Disk image did not mount correctly${NC}"
+# Extract mount point from hdiutil output (last column of last line)
+MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | grep "/Volumes/" | sed -E 's|.*/Volumes/|/Volumes/|' | tr -d '\t')
+
+if [[ -z "$MOUNT_POINT" ]] || [[ ! -d "$MOUNT_POINT" ]]; then
+    echo -e "${RED}Error: Could not find mount point${NC}"
     exit 1
 fi
 echo -e "${GREEN}*${NC} Mounted"
