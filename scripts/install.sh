@@ -163,17 +163,11 @@ echo ""
 echo -e "Location: ${BOLD}$INSTALL_DIR/$APP_NAME.app${NC}"
 echo ""
 
-# Prompt to launch
-echo -e -n "Launch LyricGlow now? [Y/n] "
-read -r REPLY
-if [[ "$REPLY" =~ ^[Nn]$ ]]; then
-    echo ""
-    echo -e "To launch later: ${BOLD}open -a LyricGlow${NC}"
-else
-    echo -e "${BLUE}*${NC} Launching LyricGlow..."
-    open "$INSTALL_DIR/$APP_NAME.app"
-fi
+# Launch the app automatically (non-interactive install)
+echo -e "${BLUE}*${NC} Launching LyricGlow..."
+open "$INSTALL_DIR/$APP_NAME.app"
 
 echo ""
 echo -e "Enjoy your music with synchronized lyrics!"
+echo -e "To quit: Click the menu bar icon → Quit"
 echo ""
