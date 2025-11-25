@@ -9,10 +9,13 @@
 
 Word-by-word lyrics highlighting for Spotify, Apple Music, and any macOS music player.
 
-<!-- Primary Badges -->
+<!-- Status Badges -->
 <p>
   <a href="https://github.com/ateymoori/lyricglow/actions/workflows/ci.yml">
     <img src="https://github.com/ateymoori/lyricglow/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <a href="https://www.codefactor.io/repository/github/ateymoori/lyricglow">
+    <img src="https://www.codefactor.io/repository/github/ateymoori/lyricglow/badge" alt="CodeFactor">
   </a>
   <a href="https://github.com/ateymoori/lyricglow/releases">
     <img src="https://img.shields.io/github/v/release/ateymoori/lyricglow?color=00ff9f&label=Version" alt="Version">
@@ -21,16 +24,26 @@ Word-by-word lyrics highlighting for Spotify, Apple Music, and any macOS music p
     <img src="https://img.shields.io/github/downloads/ateymoori/lyricglow/total?color=00b8ff&label=Downloads" alt="Downloads">
   </a>
   <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/ateymoori/lyricglow?color=blue" alt="License">
+    <img src="https://img.shields.io/github/license/ateymoori/lyricglow" alt="License">
   </a>
 </p>
 
-<!-- Tech Badges -->
+<!-- Tech Stack -->
 <p>
-  <img src="https://img.shields.io/badge/Platform-macOS%2011+-black?logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/macOS-11.0+-000?logo=apple&logoColor=white" alt="macOS">
   <img src="https://img.shields.io/badge/Electron-33-47848F?logo=electron&logoColor=white" alt="Electron">
-  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Architecture-ARM64%20%7C%20x64-orange" alt="Architecture">
+  <img src="https://img.shields.io/badge/TypeScript-Strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/ARM64_|_x64-Universal-ff6b6b" alt="Architecture">
+</p>
+
+<!-- Community -->
+<p>
+  <a href="https://github.com/ateymoori/lyricglow/stargazers">
+    <img src="https://img.shields.io/github/stars/ateymoori/lyricglow?style=social" alt="Stars">
+  </a>
+  <a href="https://github.com/ateymoori/lyricglow/network/members">
+    <img src="https://img.shields.io/github/forks/ateymoori/lyricglow?style=social" alt="Forks">
+  </a>
 </p>
 
 <!-- Demo GIF -->
@@ -191,15 +204,11 @@ PRs welcome! Priority areas:
 **MIT License** © [AmirHossein Teymoori](https://github.com/ateymoori)
 
 <p>
-  <a href="https://github.com/ateymoori/lyricglow/issues">Report Bug</a>
-  •
-  <a href="https://github.com/ateymoori/lyricglow/issues">Request Feature</a>
-  •
-  <a href="https://github.com/ateymoori/lyricglow/releases">Releases</a>
+  <a href="https://github.com/ateymoori/lyricglow/stargazers">
+    <img src="https://img.shields.io/github/stars/ateymoori/lyricglow?style=for-the-badge&color=ff6b6b" alt="Stars">
+  </a>
 </p>
 
-<br>
-
-**If you find LyricGlow useful, consider giving it a ⭐**
+[Report Bug](https://github.com/ateymoori/lyricglow/issues) · [Request Feature](https://github.com/ateymoori/lyricglow/issues) · [Releases](https://github.com/ateymoori/lyricglow/releases)
 
 </div>
