@@ -8,6 +8,16 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+  <!-- SVG Gradient Definitions -->
+  <svg style="position: absolute; width: 0; height: 0;">
+    <defs>
+      <linearGradient id="vinyl-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" style="stop-color: var(--color-primary)" />
+        <stop offset="100%" style="stop-color: var(--color-secondary)" />
+      </linearGradient>
+    </defs>
+  </svg>
+
   <div class="player-widget">
     <div class="header-buttons">
       <button class="icon-btn icon-btn-sm btn-settings" id="settingsBtn" title="Settings">⚙</button>
@@ -15,7 +25,19 @@
     </div>
 
       <div class="player-content" data-section="player">
-      <img class="album-art" id="albumArt" alt="">
+      <!-- Vinyl Disc Player -->
+      <div class="vinyl-player" id="vinylPlayer">
+        <div class="vinyl-disc" id="vinylDisc">
+          <div class="vinyl-artwork">
+            <img class="album-art" id="albumArt" alt="">
+          </div>
+        </div>
+        <!-- Progress ring outside disc so it doesn't rotate -->
+        <svg class="vinyl-progress" viewBox="0 0 120 120">
+          <circle class="vinyl-progress-bg" cx="60" cy="60" r="56" />
+          <circle class="vinyl-progress-fill" id="vinylProgressFill" cx="60" cy="60" r="56" />
+        </svg>
+      </div>
 
       <div class="track-info">
         <div class="track-main">

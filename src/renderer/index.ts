@@ -159,7 +159,11 @@ const elements = {
   genre: document.getElementById('genre') as HTMLElement,
   bpm: document.getElementById('bpm') as HTMLElement,
   playCount: document.getElementById('playCount') as HTMLElement,
-  rating: document.getElementById('rating') as HTMLElement
+  rating: document.getElementById('rating') as HTMLElement,
+  // Vinyl disc elements
+  vinylPlayer: document.getElementById('vinylPlayer') as HTMLElement,
+  vinylDisc: document.getElementById('vinylDisc') as HTMLElement,
+  vinylProgressFill: document.getElementById('vinylProgressFill') as unknown as SVGCircleElement
 };
 
 // Progress bar seeking functionality
@@ -232,6 +236,93 @@ function updatePlayPauseButton(isPlaying: boolean): void {
     pauseIcon.style.display = 'none';
   }
 }
+
+/**
+ * VinylDiscController: Manages the vinyl disc animation and progress
+ *
+ * Features:
+ * - Rotation animation synced to playback state
+ * - Circular SVG progress ring
+ * - Smooth transitions
+ */
+class VinylDiscController {
+  private circumference: number;
+  private isPlaying: boolean;
+
+  constructor() {
+    // SVG circle circumference: 2 * PI * radius (r=56)
+    this.circumference = 2 * Math.PI * 56;
+    this.isPlaying = false;
+    this.init();
+  }
+
+  init(): void {
+    if (elements.vinylProgressFill) {
+      // Set initial stroke-dasharray
+      elements.vinylProgressFill.style.strokeDasharray = `${this.circumference}`;
+      elements.vinylProgressFill.style.strokeDashoffset = `${this.circumference}`;
+    }
+  }
+
+  /**
+   * Update the circular progress based on playback position
+   * @param progress - Value from 0 to 1
+   */
+  updateProgress(progress: number): void {
+    if (!elements.vinylProgressFill) return;
+
+    const clampedProgress = Math.max(0, Math.min(1, progress));
+    const offset = this.circumference * (1 - clampedProgress);
+    elements.vinylProgressFill.style.strokeDashoffset = `${offset}`;
+  }
+
+  /**
+   * Set playing state (controls rotation animation)
+   */
+  setPlaying(playing: boolean): void {
+    if (this.isPlaying === playing) return;
+    this.isPlaying = playing;
+
+    if (elements.vinylDisc) {
+      if (playing) {
+        elements.vinylDisc.classList.add('playing');
+      } else {
+        elements.vinylDisc.classList.remove('playing');
+      }
+    }
+  }
+
+  /**
+   * Show the vinyl player
+   */
+  show(): void {
+    if (elements.vinylPlayer) {
+      elements.vinylPlayer.classList.add('show');
+    }
+  }
+
+  /**
+   * Hide the vinyl player
+   */
+  hide(): void {
+    if (elements.vinylPlayer) {
+      elements.vinylPlayer.classList.remove('show');
+    }
+    this.setPlaying(false);
+    this.updateProgress(0);
+  }
+
+  /**
+   * Reset to initial state
+   */
+  reset(): void {
+    this.updateProgress(0);
+    this.setPlaying(false);
+  }
+}
+
+// Create vinyl disc controller instance
+const vinylDiscController = new VinylDiscController();
 
 /**
  * LyricsSyncManager: Single source of truth for lyrics state
@@ -900,10 +991,13 @@ function updateInternalPosition(): void {
       internalPosition = currentMusicData.duration;
     }
 
-    // Update progress bar
+    // Update progress bar (linear)
     const progress = (internalPosition / currentMusicData.duration) * 100;
     elements.progressBar.style.width = `${progress}%`;
     elements.currentTime.textContent = formatTime(internalPosition);
+
+    // Update vinyl disc progress (circular)
+    vinylDiscController.updateProgress(internalPosition / currentMusicData.duration);
 
     // ★★★ ATOMIC SYNC ★★★
     // Update position in sync manager (broadcasts to all displays when line changes)
@@ -938,6 +1032,7 @@ function updateDisplay(data: MusicData | null): void {
     elements.artist.textContent = '';
     elements.album.textContent = '';
     elements.albumArt.classList.remove('show');
+    vinylDiscController.hide();
     elements.progressBar.style.width = '0%';
     elements.currentTime.textContent = '0:00';
     elements.duration.textContent = '0:00';
@@ -974,13 +1069,22 @@ function updateDisplay(data: MusicData | null): void {
   if (data.artworkUrl) {
     elements.albumArt.src = data.artworkUrl;
     elements.albumArt.classList.add('show');
+    vinylDiscController.show();
     if (data.spotifyUrl) {
       elements.albumArt.title = 'Open in Spotify';
       elements.albumArt.onclick = () => window.musicAPI.openExternal(data.spotifyUrl!);
+      if (elements.vinylDisc) {
+        elements.vinylDisc.title = 'Open in Spotify';
+        elements.vinylDisc.onclick = () => window.musicAPI.openExternal(data.spotifyUrl!);
+      }
     }
   } else {
     elements.albumArt.classList.remove('show');
+    vinylDiscController.show(); // Still show vinyl even without artwork
   }
+
+  // Update vinyl rotation based on playback state
+  vinylDiscController.setPlaying(data.isPlaying);
 
   if (data.duration && data.position !== undefined) {
     const positionDiff = Math.abs(data.position - internalPosition);
@@ -1002,6 +1106,7 @@ function updateDisplay(data: MusicData | null): void {
   }
 
   updatePlayPauseButton(data.isPlaying);
+  vinylDiscController.setPlaying(data.isPlaying);
 
   updateDetails(data);
 }
