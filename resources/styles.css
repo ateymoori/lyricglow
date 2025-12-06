@@ -353,33 +353,28 @@ body {
   animation: none;
 }
 
-/* SVG Progress Ring - positioned over the disc but doesn't rotate */
+/* SVG Progress - radial fill from center outward */
 .vinyl-progress {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  transform: rotate(-90deg);
   pointer-events: none;
   z-index: 10;
 }
 
 .vinyl-progress-bg {
   fill: none;
-  stroke: rgba(255, 255, 255, 0.1);
-  stroke-width: 4;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 26;
 }
 
 .vinyl-progress-fill {
-  fill: none;
-  stroke: url(#vinyl-gradient);
-  stroke-width: 4;
-  stroke-linecap: round;
-  stroke-dasharray: 351.86;
-  stroke-dashoffset: 351.86;
-  transition: stroke-dashoffset 0.5s ease;
-  filter: drop-shadow(0 0 6px var(--color-primary));
+  fill: url(#vinyl-gradient);
+  opacity: 0.9;
+  filter: drop-shadow(0 0 8px var(--color-primary));
+  transition: d 0.3s ease;
 }
 
 /* Center artwork container */

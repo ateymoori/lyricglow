@@ -163,7 +163,7 @@ const elements = {
   // Vinyl disc elements
   vinylPlayer: document.getElementById('vinylPlayer') as HTMLElement,
   vinylDisc: document.getElementById('vinylDisc') as HTMLElement,
-  vinylProgressFill: document.getElementById('vinylProgressFill') as unknown as SVGCircleElement
+  vinylProgressFill: document.getElementById('vinylProgressFill') as unknown as SVGPathElement
 };
 
 // Progress bar seeking functionality
@@ -242,38 +242,56 @@ function updatePlayPauseButton(isPlaying: boolean): void {
  *
  * Features:
  * - Rotation animation synced to playback state
- * - Circular SVG progress ring
+ * - Radial progress arc (expands from center like gramophone)
  * - Smooth transitions
  */
 class VinylDiscController {
-  private circumference: number;
   private isPlaying: boolean;
+  private readonly centerX = 50;
+  private readonly centerY = 50;
+  private readonly innerRadius = 24;  // Start from center (near album art)
+  private readonly outerRadius = 48;  // Expand to edge
 
   constructor() {
-    // SVG circle circumference: 2 * PI * radius (r=56)
-    this.circumference = 2 * Math.PI * 56;
     this.isPlaying = false;
-    this.init();
-  }
-
-  init(): void {
-    if (elements.vinylProgressFill) {
-      // Set initial stroke-dasharray
-      elements.vinylProgressFill.style.strokeDasharray = `${this.circumference}`;
-      elements.vinylProgressFill.style.strokeDashoffset = `${this.circumference}`;
-    }
   }
 
   /**
-   * Update the circular progress based on playback position
+   * Create SVG arc path for radial progress
+   * Progress expands from inner radius to outer radius
+   */
+  private createArcPath(progress: number): string {
+    if (progress <= 0) return '';
+    
+    const clampedProgress = Math.max(0, Math.min(1, progress));
+    
+    // Calculate the current radius based on progress
+    const currentRadius = this.innerRadius + (this.outerRadius - this.innerRadius) * clampedProgress;
+    
+    // Full circle arc from inner to current radius
+    // We draw a donut/ring shape
+    const innerR = this.innerRadius;
+    const outerR = currentRadius;
+    
+    // Create a full ring (donut) path
+    return `
+      M ${this.centerX} ${this.centerY - outerR}
+      A ${outerR} ${outerR} 0 1 1 ${this.centerX - 0.001} ${this.centerY - outerR}
+      L ${this.centerX - 0.001} ${this.centerY - innerR}
+      A ${innerR} ${innerR} 0 1 0 ${this.centerX} ${this.centerY - innerR}
+      Z
+    `;
+  }
+
+  /**
+   * Update the radial progress based on playback position
    * @param progress - Value from 0 to 1
    */
   updateProgress(progress: number): void {
     if (!elements.vinylProgressFill) return;
 
-    const clampedProgress = Math.max(0, Math.min(1, progress));
-    const offset = this.circumference * (1 - clampedProgress);
-    elements.vinylProgressFill.style.strokeDashoffset = `${offset}`;
+    const path = this.createArcPath(progress);
+    elements.vinylProgressFill.setAttribute('d', path);
   }
 
   /**

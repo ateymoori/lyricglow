@@ -32,10 +32,18 @@
             <img class="album-art" id="albumArt" alt="">
           </div>
         </div>
-        <!-- Progress ring outside disc so it doesn't rotate -->
-        <svg class="vinyl-progress" viewBox="0 0 120 120">
-          <circle class="vinyl-progress-bg" cx="60" cy="60" r="56" />
-          <circle class="vinyl-progress-fill" id="vinylProgressFill" cx="60" cy="60" r="56" />
+        <!-- Progress arc - expands from center outward like gramophone -->
+        <svg class="vinyl-progress" viewBox="0 0 100 100">
+          <defs>
+            <mask id="progressMask">
+              <circle cx="50" cy="50" r="50" fill="white" />
+              <circle cx="50" cy="50" r="24" fill="black" />
+            </mask>
+          </defs>
+          <!-- Background track -->
+          <circle class="vinyl-progress-bg" cx="50" cy="50" r="37" />
+          <!-- Progress arc that grows from center -->
+          <path class="vinyl-progress-fill" id="vinylProgressFill" d="" />
         </svg>
       </div>
 
