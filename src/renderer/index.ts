@@ -150,6 +150,7 @@ declare global {
       translationGetTargetLang: () => Promise<string>;
       translationSetTargetLang: (langCode: string) => Promise<boolean>;
       translationGetLanguages: () => Promise<Array<{ code: string; name: string; rtl: boolean }>>;
+      translationRefresh: () => Promise<boolean>;
     };
   }
 }
