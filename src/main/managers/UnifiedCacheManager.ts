@@ -71,7 +71,8 @@ class UnifiedCacheManager {
       this.cacheRoot,
       path.join(this.cacheRoot, 'images'),
       path.join(this.cacheRoot, 'lyrics'),
-      path.join(this.cacheRoot, 'metadata')
+      path.join(this.cacheRoot, 'metadata'),
+      path.join(this.cacheRoot, 'translations')
     ];
     await Promise.all(
       dirs.map(dir => fs.promises.mkdir(dir, { recursive: true }).catch(() => {}))

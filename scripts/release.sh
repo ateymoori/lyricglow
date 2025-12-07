@@ -20,8 +20,8 @@ echo ""
 
 # Clean old builds
 echo "🧹 Cleaning old builds..."
-rm -rf dist
-echo "✅ Cleaned dist folder"
+rm -rf release
+echo "✅ Cleaned release folder"
 echo ""
 
 # Build DMG
@@ -33,10 +33,10 @@ echo ""
 echo "✅ DMG created successfully!"
 echo ""
 echo "📍 Location:"
-ls -lh dist/*.dmg
+ls -lh release/*.dmg
 echo ""
 
-DMG_FILE=$(ls dist/*.dmg | /usr/bin/head -n 1)
+DMG_FILE=$(ls release/*.dmg | /usr/bin/head -n 1)
 DMG_SIZE=$(du -h "$DMG_FILE" | cut -f1)
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -28,6 +28,7 @@ import ImageCacheManager from './managers/ImageCacheManager';
 import SpotifyAuth from './auth/SpotifyAuth';
 import SpotifyMetadataManager from './managers/SpotifyMetadataManager';
 import UpdateManager from './managers/UpdateManager';
+import TranslationManager, { SUPPORTED_LANGUAGES } from './managers/TranslationManager';
 
 // Type definitions
 interface Config {
@@ -92,6 +93,7 @@ const unifiedCache = new UnifiedCacheManager(config, cachePath);
 const lyricsManager = new LyricsManager(unifiedCache);
 const audioDBManager = new TheAudioDBManager(unifiedCache);
 const imageCache = new ImageCacheManager(unifiedCache);
+const translationManager = new TranslationManager(unifiedCache);
 
 // Initialize Spotify integration
 const spotifyAuth = new SpotifyAuth();
@@ -114,6 +116,12 @@ let settingsStore: Store | null = null;
 
 // Tray lyrics setting
 let trayLyricsEnabled = true; // Show lyrics in system tray (default: enabled)
+
+// Translation settings
+let translationEnabled = false; // Enable lyrics translation (default: disabled)
+let translationTargetLang = 'en'; // Target language code (default: English)
+let currentSyncedLyrics: string | null = null; // Store raw synced lyrics for refresh
+let translationInProgress = false; // Prevent concurrent translation calls
 
 // Lyrics sync state (managed in main process for independent tray updates)
 let currentLyrics: Array<{ time: number; text: string }> = [];
@@ -144,6 +152,8 @@ async function getSettingsStore(): Promise<Store> {
     autoHideEnabled = settingsStore.get('autoHideEnabled', false) as boolean;
     windowEnabled = settingsStore.get('windowEnabled', true) as boolean;
     trayLyricsEnabled = settingsStore.get('trayLyricsEnabled', true) as boolean;
+    translationEnabled = settingsStore.get('translationEnabled', false) as boolean;
+    translationTargetLang = settingsStore.get('translationTargetLang', 'en') as string;
   }
   return settingsStore;
 }
@@ -598,6 +608,62 @@ function updatePollInterval(trackData: TrackData | null): void {
   }
 }
 
+/**
+ * Translate lyrics asynchronously and send to renderer when ready
+ * Non-blocking - app continues working while translation happens in background
+ * Includes race condition protection to prevent stale translations
+ */
+async function translateLyricsAsync(syncedLyrics: string, trackKey: string): Promise<void> {
+  // Prevent concurrent translation calls - last one wins
+  if (translationInProgress) {
+    Logger.lyrics.debug('Translation skipped: another in progress');
+    return;
+  }
+
+  translationInProgress = true;
+  const targetLang = translationTargetLang; // Capture at call time
+
+  try {
+    // Parse synced lyrics to extract text lines
+    const lines = syncedLyrics.split('\n');
+    const textLines: string[] = [];
+
+    for (const line of lines) {
+      const match = line.match(/^\[\d{2}:\d{2}\.\d{2}\](.*)$/);
+      if (match && match[1] !== undefined) {
+        textLines.push(match[1].trim());
+      }
+    }
+
+    if (!textLines.length) {
+      translationInProgress = false;
+      return;
+    }
+
+    // Translate batch
+    const result = await translationManager.translateBatch(textLines, targetLang, trackKey);
+
+    // Verify settings haven't changed during translation
+    if (result && mainWindow && !mainWindow.isDestroyed()) {
+      // Check if track or language changed while translating
+      if (currentTrackKey === trackKey && translationTargetLang === targetLang && translationEnabled) {
+        mainWindow.webContents.send('translation:update', {
+          translations: result.translated,
+          targetLang: result.targetLang,
+          isTargetRTL: result.isTargetRTL
+        });
+        Logger.lyrics.debug(`Translation sent: ${textLines.length} lines → ${targetLang}`);
+      } else {
+        Logger.lyrics.debug('Translation discarded: settings changed during fetch');
+      }
+    }
+  } catch (error) {
+    Logger.lyrics.error('Translation failed', error as Error);
+  } finally {
+    translationInProgress = false;
+  }
+}
+
 async function broadcastMusicUpdate(trackData: TrackData | null): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('music:update', trackData);
@@ -615,29 +681,44 @@ async function broadcastMusicUpdate(trackData: TrackData | null): Promise<void> 
         isInternalPlaying = trackData.isPlaying;
         lastPositionUpdate = Date.now();
 
-        const [lyricsData, audioDBMetadata, spotifyMetadata] = await Promise.all([
-          lyricsManager.fetchLyrics(trackData.title, trackData.artist),
-          audioDBManager.fetchMetadata(trackData.artist),
-          spotifyAuth.isLoggedIn()
-            ? spotifyMetadataManager.fetchMetadata(trackData)
-            : Promise.resolve(null)
-        ]);
+        // Fire all fetches in parallel but send results independently as they complete
+        // This makes the app feel faster - each data type shows as soon as it's ready
 
-        const mergedMetadata = mergeArtistMetadata(audioDBMetadata, spotifyMetadata);
+        // Lyrics fetch - send immediately when ready, don't wait for metadata
+        lyricsManager.fetchLyrics(trackData.title, trackData.artist).then((lyricsData) => {
+          if (mainWindow && !mainWindow.isDestroyed() && currentTrackKey === trackKey) {
+            mainWindow.webContents.send('lyrics:update', lyricsData);
 
-        // Send data to renderer for window display
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('lyrics:update', lyricsData);
-          mainWindow.webContents.send('metadata:update', mergedMetadata);
-        }
+            // Store synced lyrics for potential refresh when translation settings change
+            currentSyncedLyrics = lyricsData?.synced || null;
 
-        // Main process manages tray lyrics sync independently
-        if (lyricsData && lyricsData.synced) {
-          startLyricsSync(lyricsData);
-        } else {
-          stopLyricsSync();
-          if (tray) tray.setTitle('');
-        }
+            // Async translation - non-blocking
+            if (translationEnabled && lyricsData && lyricsData.synced) {
+              translateLyricsAsync(lyricsData.synced, trackKey);
+            }
+
+            // Main process manages tray lyrics sync
+            if (lyricsData && lyricsData.synced) {
+              startLyricsSync(lyricsData);
+            } else {
+              stopLyricsSync();
+              if (tray) tray.setTitle('');
+            }
+          }
+        });
+
+        // Metadata fetches - run in parallel, merge and send when both complete
+        const audioDBPromise = audioDBManager.fetchMetadata(trackData.artist);
+        const spotifyPromise = spotifyAuth.isLoggedIn()
+          ? spotifyMetadataManager.fetchMetadata(trackData)
+          : Promise.resolve(null);
+
+        Promise.all([audioDBPromise, spotifyPromise]).then(([audioDBMetadata, spotifyMetadata]) => {
+          if (mainWindow && !mainWindow.isDestroyed() && currentTrackKey === trackKey) {
+            const mergedMetadata = mergeArtistMetadata(audioDBMetadata, spotifyMetadata);
+            mainWindow.webContents.send('metadata:update', mergedMetadata);
+          }
+        });
       } else {
         // Same track - update position smoothly
         updateInternalPosition(trackData.position, trackData.isPlaying);
@@ -1122,6 +1203,68 @@ ipcMain.handle('settings:get-tray-lyrics', () => {
 
 ipcMain.handle('settings:set-tray-lyrics', (_event, enabled: boolean) => {
   saveTrayLyricsSetting(enabled);
+  return true;
+});
+
+// Translation settings IPC handlers
+ipcMain.handle('translation:get-enabled', () => {
+  return translationEnabled;
+});
+
+ipcMain.handle('translation:set-enabled', (_event, enabled: boolean) => {
+  translationEnabled = enabled;
+  if (settingsStore) {
+    settingsStore.set('translationEnabled', enabled);
+  }
+  Logger.app.info(`Translation ${enabled ? 'enabled' : 'disabled'}`);
+  return true;
+});
+
+ipcMain.handle('translation:get-target-lang', () => {
+  return translationTargetLang;
+});
+
+ipcMain.handle('translation:set-target-lang', (_event, langCode: string) => {
+  translationTargetLang = langCode;
+  if (settingsStore) {
+    settingsStore.set('translationTargetLang', langCode);
+  }
+  Logger.app.info(`Translation target language set to: ${langCode}`);
+  return true;
+});
+
+ipcMain.handle('translation:get-languages', () => {
+  return SUPPORTED_LANGUAGES;
+});
+
+// Refresh translations with current lyrics and new settings
+ipcMain.handle('translation:refresh', async () => {
+  if (!translationEnabled) {
+    // Translation disabled - send complete clear payload to UI
+    translationInProgress = false; // Reset flag to allow future translations
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('translation:update', {
+        translations: [],
+        targetLang: translationTargetLang,
+        isTargetRTL: false
+      });
+    }
+    return true;
+  }
+
+  if (!currentSyncedLyrics || !currentTrackKey) {
+    Logger.lyrics.debug('No synced lyrics available for translation refresh');
+    return false;
+  }
+
+  // Wait for any in-progress translation to complete before starting new one
+  // This ensures language changes take effect
+  while (translationInProgress) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  // Re-translate with new settings
+  await translateLyricsAsync(currentSyncedLyrics, currentTrackKey);
   return true;
 });
 

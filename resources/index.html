@@ -106,10 +106,15 @@
 
     <div class="lyrics-container" id="lyricsContainer" data-section="lyrics">
       <div class="lyrics-line lyrics-previous" id="lyricsPrevious"></div>
-      <div class="lyrics-line lyrics-current" id="lyricsCurrent">
-        <span class="lyrics-text"></span>
+      <div class="lyrics-translation lyrics-translation-prev" id="lyricsPreviousTranslation"></div>
+      <div class="lyrics-current-wrapper">
+        <div class="lyrics-line lyrics-current" id="lyricsCurrent">
+          <span class="lyrics-text"></span>
+        </div>
+        <div class="lyrics-translation lyrics-translation-current" id="lyricsCurrentTranslation"></div>
       </div>
       <div class="lyrics-line lyrics-next" id="lyricsNext"></div>
+      <div class="lyrics-translation lyrics-translation-next" id="lyricsNextTranslation"></div>
     </div>
 
     <div class="metadata-container" id="metadataContainer">
@@ -225,6 +230,26 @@
                   <span class="setting-description">Display current lyric line next to the app icon</span>
                 </div>
               </label>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>Translation</h3>
+            <div class="settings-group">
+              <label class="setting-row visibility-option">
+                <input type="checkbox" id="settings-translation-enabled">
+                <span class="checkbox-custom"></span>
+                <div class="setting-content">
+                  <span class="setting-label">Enable Lyrics Translation</span>
+                  <span class="setting-description">Show translated lyrics below original text</span>
+                </div>
+              </label>
+              <div class="setting-row translation-lang-row" id="translation-lang-container" style="display: none;">
+                <div class="setting-content">
+                  <span class="setting-label">Target Language</span>
+                </div>
+                <select class="setting-select" id="settings-translation-lang"></select>
+              </div>
             </div>
           </div>
 

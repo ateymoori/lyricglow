@@ -59,6 +59,15 @@ interface MusicAPI {
   logsGetStats: () => Promise<any>;
   logsOpenFolder: () => Promise<boolean>;
   logsClear: () => Promise<boolean>;
+
+  // Translation
+  onTranslationUpdate: (callback: (payload: any) => void) => void;
+  translationGetEnabled: () => Promise<boolean>;
+  translationSetEnabled: (enabled: boolean) => Promise<boolean>;
+  translationGetTargetLang: () => Promise<string>;
+  translationSetTargetLang: (langCode: string) => Promise<boolean>;
+  translationGetLanguages: () => Promise<Array<{ code: string; name: string; rtl: boolean }>>;
+  translationRefresh: () => Promise<boolean>;
 }
 
 const musicAPI: MusicAPI = {
@@ -183,6 +192,31 @@ const musicAPI: MusicAPI = {
   },
   logsClear: () => {
     return ipcRenderer.invoke('logs:clear');
+  },
+
+  // Translation
+  onTranslationUpdate: (callback: (payload: any) => void) => {
+    ipcRenderer.on('translation:update', (_event: IpcRendererEvent, payload: any) =>
+      callback(payload)
+    );
+  },
+  translationGetEnabled: () => {
+    return ipcRenderer.invoke('translation:get-enabled');
+  },
+  translationSetEnabled: (enabled: boolean) => {
+    return ipcRenderer.invoke('translation:set-enabled', enabled);
+  },
+  translationGetTargetLang: () => {
+    return ipcRenderer.invoke('translation:get-target-lang');
+  },
+  translationSetTargetLang: (langCode: string) => {
+    return ipcRenderer.invoke('translation:set-target-lang', langCode);
+  },
+  translationGetLanguages: () => {
+    return ipcRenderer.invoke('translation:get-languages');
+  },
+  translationRefresh: () => {
+    return ipcRenderer.invoke('translation:refresh');
   }
 };
 

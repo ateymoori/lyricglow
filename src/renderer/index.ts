@@ -48,6 +48,11 @@ interface SyncData {
   totalLines: number;
   isRTL: boolean;
   position: number;
+  // Translation data
+  currentTranslation: string | null;
+  prevTranslation: string | null;
+  nextTranslation: string | null;
+  isTranslationRTL: boolean;
 }
 
 interface WordState {
@@ -139,6 +144,12 @@ declare global {
       logsGetStats: () => Promise<any>;
       logsOpenFolder: () => Promise<boolean>;
       logsClear: () => Promise<boolean>;
+      onTranslationUpdate: (callback: (payload: any) => void) => void;
+      translationGetEnabled: () => Promise<boolean>;
+      translationSetEnabled: (enabled: boolean) => Promise<boolean>;
+      translationGetTargetLang: () => Promise<string>;
+      translationSetTargetLang: (langCode: string) => Promise<boolean>;
+      translationGetLanguages: () => Promise<Array<{ code: string; name: string; rtl: boolean }>>;
     };
   }
 }
@@ -365,6 +376,11 @@ class LyricsSyncManager {
   mainDisplay: LyricsMainDisplay | null;
   modalDisplay: FullLyricsModalDisplay | null;
 
+  // Translation state
+  translations: string[];
+  isTranslationRTL: boolean;
+  translationLang: string;
+
   constructor() {
     // Single source of truth for lyrics state
     this.lyrics = [];
@@ -372,6 +388,11 @@ class LyricsSyncManager {
     this.currentPosition = 0;
     this.isRTL = false;
     this.state = 'empty'; // empty | loading | unavailable | instrumental | ready
+
+    // Translation state
+    this.translations = [];
+    this.isTranslationRTL = false;
+    this.translationLang = '';
 
     // Display references (injected after construction)
     this.mainDisplay = null;
@@ -487,6 +508,12 @@ class LyricsSyncManager {
     const nextLine =
       this.currentIndex < this.lyrics.length - 1 ? (this.lyrics[this.currentIndex + 1] || null) : null;
 
+    // Get translations for current lines
+    const currentTranslation = this.translations[this.currentIndex] || null;
+    const prevTranslation = this.currentIndex > 0 ? (this.translations[this.currentIndex - 1] || null) : null;
+    const nextTranslation =
+      this.currentIndex < this.translations.length - 1 ? (this.translations[this.currentIndex + 1] || null) : null;
+
     // Prepare sync data payload
     const syncData: SyncData = {
       currentLine,
@@ -495,7 +522,12 @@ class LyricsSyncManager {
       currentIndex: this.currentIndex,
       totalLines: this.lyrics.length,
       isRTL: this.isRTL,
-      position: this.currentPosition
+      position: this.currentPosition,
+      // Translation data
+      currentTranslation,
+      prevTranslation,
+      nextTranslation,
+      isTranslationRTL: this.isTranslationRTL
     };
 
     // 1. Update main app display (3-line view with word glow)
@@ -553,6 +585,25 @@ class LyricsSyncManager {
     this.currentPosition = 0;
     this.isRTL = false;
     this.state = 'empty';
+    this.translations = [];
+    this.isTranslationRTL = false;
+    this.translationLang = '';
+  }
+
+  /**
+   * Set translations from IPC event
+   */
+  setTranslations(data: { translations: string[]; targetLang: string; isTargetRTL: boolean }): void {
+    if (!data || !data.translations) return;
+
+    this.translations = data.translations;
+    this.translationLang = data.targetLang;
+    this.isTranslationRTL = data.isTargetRTL;
+
+    // Re-broadcast to update displays with translations
+    if (this.state === 'ready') {
+      this.broadcast();
+    }
   }
 }
 
@@ -573,6 +624,9 @@ class LyricsMainDisplay {
     current: HTMLElement | null;
     next: HTMLElement | null;
     currentText: HTMLElement | null;
+    previousTranslation: HTMLElement | null;
+    currentTranslation: HTMLElement | null;
+    nextTranslation: HTMLElement | null;
   };
   cachedWords: HTMLElement[];
   wordStates: WordState[];
@@ -586,7 +640,10 @@ class LyricsMainDisplay {
       previous: null,
       current: null,
       next: null,
-      currentText: null
+      currentText: null,
+      previousTranslation: null,
+      currentTranslation: null,
+      nextTranslation: null
     };
 
     // Word glow state (managed per current line)
@@ -605,7 +662,10 @@ class LyricsMainDisplay {
       previous: document.getElementById('lyricsPrevious'),
       current: document.getElementById('lyricsCurrent'),
       next: document.getElementById('lyricsNext'),
-      currentText: document.querySelector('#lyricsCurrent .lyrics-text')
+      currentText: document.querySelector('#lyricsCurrent .lyrics-text'),
+      previousTranslation: document.getElementById('lyricsPreviousTranslation'),
+      currentTranslation: document.getElementById('lyricsCurrentTranslation'),
+      nextTranslation: document.getElementById('lyricsNextTranslation')
     };
   }
 
@@ -626,6 +686,39 @@ class LyricsMainDisplay {
 
     // Update current line with word spans
     this.setCurrentLine(syncData.currentLine.text, syncData.isRTL);
+
+    // Update translations (if available)
+    this.renderTranslations(syncData);
+  }
+
+  /**
+   * Render translation lines below original lyrics
+   */
+  renderTranslations(syncData: SyncData): void {
+    const hasTranslation = syncData.currentTranslation || syncData.prevTranslation || syncData.nextTranslation;
+
+    // Show/hide translation container
+    if (this.container) {
+      if (hasTranslation) {
+        this.container.classList.add('has-translation');
+      } else {
+        this.container.classList.remove('has-translation');
+      }
+    }
+
+    // Update translation text
+    if (this.elements.previousTranslation) {
+      this.elements.previousTranslation.textContent = syncData.prevTranslation || '';
+      this.elements.previousTranslation.style.direction = syncData.isTranslationRTL ? 'rtl' : 'ltr';
+    }
+    if (this.elements.currentTranslation) {
+      this.elements.currentTranslation.textContent = syncData.currentTranslation || '';
+      this.elements.currentTranslation.style.direction = syncData.isTranslationRTL ? 'rtl' : 'ltr';
+    }
+    if (this.elements.nextTranslation) {
+      this.elements.nextTranslation.textContent = syncData.nextTranslation || '';
+      this.elements.nextTranslation.style.direction = syncData.isTranslationRTL ? 'rtl' : 'ltr';
+    }
   }
 
   /**
@@ -738,6 +831,10 @@ class LyricsMainDisplay {
     if (this.elements.previous) this.elements.previous.textContent = '';
     if (this.elements.currentText) this.elements.currentText.innerHTML = '';
     if (this.elements.next) this.elements.next.textContent = '';
+    if (this.elements.previousTranslation) this.elements.previousTranslation.textContent = '';
+    if (this.elements.currentTranslation) this.elements.currentTranslation.textContent = '';
+    if (this.elements.nextTranslation) this.elements.nextTranslation.textContent = '';
+    if (this.container) this.container.classList.remove('has-translation');
     this.cachedWords = [];
     this.wordStates = [];
     this.currentSyncData = null;
@@ -1194,6 +1291,15 @@ window.musicAPI.onLyricsUpdate((lyricsData: LyricsData | null) => {
     if (!isTrackChanging && currentMusicData && currentMusicData.position !== undefined) {
       lyricsSyncManager.updatePosition(internalPosition);
     }
+  }
+});
+
+/**
+ * Translation IPC handler: Receives async translations from main process
+ */
+window.musicAPI.onTranslationUpdate((translationData: { translations: string[]; targetLang: string; isTargetRTL: boolean } | null) => {
+  if (translationData) {
+    lyricsSyncManager.setTranslations(translationData);
   }
 });
 
@@ -1788,6 +1894,7 @@ class SettingsHandler {
     this.initLogsTab();
     this.initLaunchAtLogin();
     this.initTrayLyrics();
+    this.initTranslation();
 
     window.musicAPI.onOpenSettings(() => {
       this.show();
@@ -2012,6 +2119,65 @@ class SettingsHandler {
     }
   }
 
+  async initTranslation(): Promise<void> {
+    const checkbox = document.getElementById('settings-translation-enabled') as HTMLInputElement;
+    const select = document.getElementById('settings-translation-lang') as HTMLSelectElement;
+    const langContainer = document.getElementById('translation-lang-container') as HTMLElement;
+
+    if (!checkbox || !select) return;
+
+    // Load initial state
+    const enabled = await window.musicAPI.translationGetEnabled();
+    const targetLang = await window.musicAPI.translationGetTargetLang();
+    const languages = await window.musicAPI.translationGetLanguages();
+
+    checkbox.checked = enabled;
+
+    // Populate language dropdown
+    select.innerHTML = '';
+    languages.forEach((lang) => {
+      const option = document.createElement('option');
+      option.value = lang.code;
+      option.textContent = lang.name;
+      if (lang.code === targetLang) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    });
+
+    // Show/hide language selector based on enabled state
+    if (langContainer) {
+      langContainer.style.display = enabled ? 'flex' : 'none';
+    }
+
+    // Enable/disable toggle
+    const enableLabel = checkbox.closest('.visibility-option');
+    if (enableLabel) {
+      enableLabel.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        checkbox.checked = !checkbox.checked;
+        await window.musicAPI.translationSetEnabled(checkbox.checked);
+
+        // Show/hide language selector
+        if (langContainer) {
+          langContainer.style.display = checkbox.checked ? 'flex' : 'none';
+        }
+
+        // Refresh translations immediately with new settings
+        await window.musicAPI.translationRefresh();
+      });
+    }
+
+    // Language change handler
+    select.addEventListener('change', async () => {
+      await window.musicAPI.translationSetTargetLang(select.value);
+      // Refresh translations immediately with new language
+      await window.musicAPI.translationRefresh();
+    });
+  }
+
   async loadCacheList(): Promise<void> {
     const entries = await window.musicAPI.cacheList();
     const statsEl = document.getElementById('cacheStatsText');
@@ -2035,7 +2201,7 @@ class SettingsHandler {
       item.className = 'cache-item';
 
       const icon = this.getCacheIcon(entry.type);
-      const title = this.formatCacheTitle(entry.key);
+      const title = this.formatCacheTitle(entry.key, entry.type);
       const sizeMB = (entry.size / 1024 / 1024).toFixed(2);
       const date = this.formatDate(entry.timestamp);
 
@@ -2067,16 +2233,41 @@ class SettingsHandler {
     const icons: { [key: string]: string } = {
       lyrics: '🎵',
       images: '🖼️',
-      metadata: '📊'
+      metadata: '📊',
+      translations: '🌐'
     };
     return icons[type] || '📁';
   }
 
-  formatCacheTitle(key: string): string {
+  formatCacheTitle(key: string, type: string): string {
+    // Handle translation cache keys (format: "Song-Artist:langCode")
+    if (type === 'translations' && key.includes(':')) {
+      const [songArtist, langCode] = key.split(':');
+      const langName = this.getLanguageName(langCode || '');
+      if (songArtist && langName) {
+        const displayKey = songArtist.length > 35 ? songArtist.substring(0, 32) + '...' : songArtist;
+        return `${displayKey} → ${langName}`;
+      }
+    }
+
     if (key.length > 50) {
       return key.substring(0, 47) + '...';
     }
     return key;
+  }
+
+  getLanguageName(code: string): string {
+    const languages: { [key: string]: string } = {
+      en: 'English', es: 'Spanish', fr: 'French', de: 'German',
+      it: 'Italian', pt: 'Portuguese', ru: 'Russian', ja: 'Japanese',
+      ko: 'Korean', zh: 'Chinese', ar: 'Arabic', fa: 'Persian',
+      he: 'Hebrew', hi: 'Hindi', tr: 'Turkish', nl: 'Dutch',
+      pl: 'Polish', sv: 'Swedish', da: 'Danish', no: 'Norwegian',
+      fi: 'Finnish', el: 'Greek', cs: 'Czech', hu: 'Hungarian',
+      ro: 'Romanian', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian',
+      ms: 'Malay', uk: 'Ukrainian'
+    };
+    return languages[code] || code.toUpperCase();
   }
 
   formatDate(timestamp: number): string {
