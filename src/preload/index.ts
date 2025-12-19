@@ -13,6 +13,8 @@ interface MusicAPI {
   onUpdate: (callback: (payload: any) => void) => void;
   onLyricsUpdate: (callback: (payload: any) => void) => void;
   onMetadataUpdate: (callback: (payload: any) => void) => void;
+  onPermissionError: (callback: () => void) => void;
+  onPermissionGranted: (callback: () => void) => void;
   updateTrayLyrics: (text: string) => void;
 
   // App control
@@ -84,6 +86,12 @@ const musicAPI: MusicAPI = {
     ipcRenderer.on('metadata:update', (_event: IpcRendererEvent, payload: any) =>
       callback(payload)
     );
+  },
+  onPermissionError: (callback: () => void) => {
+    ipcRenderer.on('music:permission-error', () => callback());
+  },
+  onPermissionGranted: (callback: () => void) => {
+    ipcRenderer.on('music:permission-granted', () => callback());
   },
   updateTrayLyrics: (text: string) => {
     ipcRenderer.send('tray:update-lyrics', text);

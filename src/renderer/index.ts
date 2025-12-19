@@ -114,6 +114,8 @@ declare global {
       onUpdate: (callback: (payload: MusicData) => void) => void;
       onLyricsUpdate: (callback: (payload: LyricsData) => void) => void;
       onMetadataUpdate: (callback: (payload: Metadata) => void) => void;
+      onPermissionError: (callback: () => void) => void;
+      onPermissionGranted: (callback: () => void) => void;
       updateTrayLyrics: (text: string) => void;
       quit: () => void;
       closeWindow: () => void;
@@ -1080,6 +1082,7 @@ let internalIsPlaying = false;
 let lastSyncTime = Date.now();
 let internalAnimationRunning = false;
 let isTrackChanging = false;
+let hasPermissionError = false;
 
 function startInternalTimer(): void {
   if (internalAnimationRunning) return;
@@ -1144,9 +1147,18 @@ function updateDisplay(data: MusicData | null): void {
 
   if (!data || !data.nowPlayingAvailable) {
     document.body.classList.add('no-music');
-    elements.title.textContent = 'No music playing';
-    elements.artist.textContent = '';
-    elements.album.textContent = '';
+    
+    // Show appropriate message based on permission state
+    if (hasPermissionError) {
+      elements.title.textContent = 'Permission Required';
+      elements.artist.textContent = 'LyricGlow needs permission to read music data';
+      elements.album.textContent = 'System Settings → Privacy & Security → Automation → Enable Music for LyricGlow';
+    } else {
+      elements.title.textContent = 'No music playing';
+      elements.artist.textContent = '';
+      elements.album.textContent = '';
+    }
+    
     elements.albumArt.classList.remove('show');
     vinylDiscController.hide();
     elements.progressBar.style.width = '0%';
@@ -1263,6 +1275,17 @@ function clearDetails(): void {
 }
 
 window.musicAPI.onUpdate(updateDisplay);
+
+// Permission error handlers
+window.musicAPI.onPermissionError(() => {
+  hasPermissionError = true;
+  updateDisplay(null); // Refresh display to show permission message
+});
+
+window.musicAPI.onPermissionGranted(() => {
+  hasPermissionError = false;
+  // Display will update automatically when music data comes through
+});
 
 /**
  * Lyrics IPC handler: Single entry point for lyrics updates

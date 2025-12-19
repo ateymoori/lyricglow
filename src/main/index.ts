@@ -106,6 +106,7 @@ let tray: Tray | null = null;
 let cachedScriptPath: string | null = null;
 let lastTrackData: TrackData | null = null;
 let currentPollInterval = 1000;
+let automationPermissionDenied = false;
 
 // Window behavior management
 let autoHideEnabled = false; // false = always show (default), true = show only when playing
@@ -555,14 +556,39 @@ function pollMusicState(): void {
     return;
   }
 
-  exec(`osascript "${cachedScriptPath}"`, (error, stdout) => {
+  exec(`osascript "${cachedScriptPath}"`, (error, stdout, stderr) => {
     if (error) {
       Logger.music.error('AppleScript execution failed', error);
       updatePollInterval(null);
       return;
     }
 
+    // Check stderr for Automation permission errors (macOS Sequoia+)
+    // Error -1743: "not authorized to send Apple events"
+    if (stderr && (stderr.includes('not authorized') || stderr.includes('-1743') || stderr.includes('assistive access'))) {
+      if (!automationPermissionDenied) {
+        automationPermissionDenied = true;
+        Logger.music.warn('Automation permission denied - user needs to grant access in System Settings');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('music:permission-error');
+        }
+      }
+      updatePollInterval(null);
+      return;
+    }
+
+    // If we get valid output, permission is granted - reset the flag
     const scriptOutput = stdout.trim();
+    if (scriptOutput && scriptOutput !== '{}') {
+      if (automationPermissionDenied) {
+        automationPermissionDenied = false;
+        Logger.music.info('Automation permission granted');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('music:permission-granted');
+        }
+      }
+    }
+
     if (!scriptOutput || scriptOutput === '{}') {
       broadcastMusicUpdate(null);
       updatePollInterval(null);
