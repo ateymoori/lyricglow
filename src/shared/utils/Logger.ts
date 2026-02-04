@@ -5,10 +5,10 @@
  * across all application modules. Preserves existing clean architecture.
  */
 
-import log from 'electron-log';
-import path from 'path';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { app } from 'electron';
-import { promises as fs } from 'fs';
+import log from 'electron-log';
 
 type LogData = Error | object | string | number | null | undefined;
 
@@ -29,22 +29,27 @@ class Logger {
   private static isConfigured = false;
 
   static configure(): void {
-    if (this.isConfigured) return;
+    if (Logger.isConfigured) return;
 
     log.transports.file.level = 'debug';
     log.transports.console.level = 'debug';
 
     log.transports.file.maxSize = 5 * 1024 * 1024;
-    log.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}] [{level}] [{scope}] {text}';
+    log.transports.file.format =
+      '[{y}-{m}-{d} {h}:{i}:{s}] [{level}] [{scope}] {text}';
     log.transports.console.format = '[{h}:{i}:{s}] [{scope}] {text}';
 
     const logsPath = path.join(app.getPath('logs'), 'main.log');
     log.transports.file.resolvePathFn = () => logsPath;
 
-    this.isConfigured = true;
+    Logger.isConfigured = true;
   }
 
-  private static formatMessage(_category: string, message: string, data?: LogData): string {
+  private static formatMessage(
+    _category: string,
+    message: string,
+    data?: LogData,
+  ): string {
     if (data !== null && data !== undefined) {
       if (data instanceof Error) {
         return `${message}: ${data.message}`;
@@ -59,25 +64,25 @@ class Logger {
 
   static error(category: string, message: string, error: LogData = null): void {
     const scope = log.scope(category);
-    const msg = this.formatMessage(category, message, error);
+    const msg = Logger.formatMessage(category, message, error);
     scope.error(msg);
   }
 
   static warn(category: string, message: string, data: LogData = null): void {
     const scope = log.scope(category);
-    const msg = this.formatMessage(category, message, data);
+    const msg = Logger.formatMessage(category, message, data);
     scope.warn(msg);
   }
 
   static info(category: string, message: string, data: LogData = null): void {
     const scope = log.scope(category);
-    const msg = this.formatMessage(category, message, data);
+    const msg = Logger.formatMessage(category, message, data);
     scope.info(msg);
   }
 
   static debug(category: string, message: string, data: LogData = null): void {
     const scope = log.scope(category);
-    const msg = this.formatMessage(category, message, data);
+    const msg = Logger.formatMessage(category, message, data);
     scope.debug(msg);
   }
 
@@ -86,42 +91,42 @@ class Logger {
     info: (msg, data) => Logger.info('APP', msg, data),
     debug: (msg, data) => Logger.debug('APP', msg, data),
     error: (msg, err) => Logger.error('APP', msg, err),
-    warn: (msg, data) => Logger.warn('APP', msg, data)
+    warn: (msg, data) => Logger.warn('APP', msg, data),
   };
 
   static music: ScopedLogger = {
     info: (msg, data) => Logger.info('MUSIC', msg, data),
     debug: (msg, data) => Logger.debug('MUSIC', msg, data),
     error: (msg, err) => Logger.error('MUSIC', msg, err),
-    warn: (msg, data) => Logger.warn('MUSIC', msg, data)
+    warn: (msg, data) => Logger.warn('MUSIC', msg, data),
   };
 
   static lyrics: ScopedLogger = {
     info: (msg, data) => Logger.info('LYRICS', msg, data),
     debug: (msg, data) => Logger.debug('LYRICS', msg, data),
     error: (msg, err) => Logger.error('LYRICS', msg, err),
-    warn: (msg, data) => Logger.warn('LYRICS', msg, data)
+    warn: (msg, data) => Logger.warn('LYRICS', msg, data),
   };
 
   static metadata: ScopedLogger = {
     info: (msg, data) => Logger.info('METADATA', msg, data),
     debug: (msg, data) => Logger.debug('METADATA', msg, data),
     error: (msg, err) => Logger.error('METADATA', msg, err),
-    warn: (msg, data) => Logger.warn('METADATA', msg, data)
+    warn: (msg, data) => Logger.warn('METADATA', msg, data),
   };
 
   static cache: ScopedLogger = {
     info: (msg, data) => Logger.info('CACHE', msg, data),
     debug: (msg, data) => Logger.debug('CACHE', msg, data),
     error: (msg, err) => Logger.error('CACHE', msg, err),
-    warn: (msg, data) => Logger.warn('CACHE', msg, data)
+    warn: (msg, data) => Logger.warn('CACHE', msg, data),
   };
 
   static auth: ScopedLogger = {
     info: (msg, data) => Logger.info('AUTH', msg, data),
     debug: (msg, data) => Logger.debug('AUTH', msg, data),
     error: (msg, err) => Logger.error('AUTH', msg, err),
-    warn: (msg, data) => Logger.warn('AUTH', msg, data)
+    warn: (msg, data) => Logger.warn('AUTH', msg, data),
   };
 
   static getLogPath(): string {
@@ -133,7 +138,7 @@ class Logger {
 
     try {
       const files = await fs.readdir(logsDir);
-      const logFiles = files.filter(f => f.endsWith('.log'));
+      const logFiles = files.filter((f) => f.endsWith('.log'));
 
       for (const file of logFiles) {
         await fs.unlink(path.join(logsDir, file));
@@ -152,7 +157,7 @@ class Logger {
 
     try {
       const files = await fs.readdir(logsDir);
-      const logFiles = files.filter(f => f.endsWith('.log'));
+      const logFiles = files.filter((f) => f.endsWith('.log'));
 
       let totalSize = 0;
       for (const file of logFiles) {
@@ -163,9 +168,9 @@ class Logger {
       return {
         count: logFiles.length,
         size: totalSize,
-        path: logsDir
+        path: logsDir,
       };
-    } catch (error) {
+    } catch (_error) {
       return { count: 0, size: 0, path: logsDir };
     }
   }

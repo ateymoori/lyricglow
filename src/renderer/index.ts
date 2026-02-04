@@ -55,6 +55,53 @@ interface SyncData {
   isTranslationRTL: boolean;
 }
 
+interface CacheEntry {
+  type: string;
+  key: string;
+  size: number;
+  timestamp: number;
+}
+
+interface MetadataElements {
+  container: HTMLElement | null;
+  artistInfo: HTMLElement | null;
+  artistAlternateName: HTMLElement | null;
+  artistCountry: HTMLElement | null;
+  artistBornYear: HTMLElement | null;
+  artistDiedYear: HTMLElement | null;
+  artistGenre: HTMLElement | null;
+  artistLinks: HTMLElement | null;
+  artistWebsite: HTMLElement | null;
+  artistFacebook: HTMLElement | null;
+  artistTwitter: HTMLElement | null;
+  artistListeners: HTMLElement | null;
+  artistPlaycount: HTMLElement | null;
+  trackPlaycount: HTMLElement | null;
+  artistProfile: HTMLElement | null;
+  tags: HTMLElement | null;
+  bioSummary: HTMLElement | null;
+  bioExpand: HTMLElement | null;
+  similarArtists: HTMLElement | null;
+  metadataBio: HTMLElement | null;
+  metadataSimilar: HTMLElement | null;
+  carouselTrack: HTMLElement | null;
+  carouselPrev: HTMLElement | null;
+  carouselNext: HTMLElement | null;
+  artistImagesCarousel: HTMLElement | null;
+  topTracksList: HTMLElement | null;
+  topTracksSection: HTMLElement | null;
+  topAlbumsGrid: HTMLElement | null;
+  topAlbumsSection: HTMLElement | null;
+  imageModal: HTMLElement | null;
+  modalImage: HTMLElement | null;
+  modalClose: HTMLElement | null;
+  modalDownload: HTMLElement | null;
+  spotifyPopularity: HTMLElement | null;
+  spotifyGenres: HTMLElement | null;
+  spotifyFollowers: HTMLElement | null;
+  [key: string]: HTMLElement | null;
+}
+
 interface WordState {
   glowing: boolean;
   intensity: number;
@@ -126,16 +173,16 @@ declare global {
       nextTrack: () => void;
       previousTrack: () => void;
       spotifyIsLoggedIn: () => Promise<boolean>;
-      spotifyGetUserProfile: () => Promise<any>;
+      spotifyGetUserProfile: () => Promise<unknown>;
       spotifyLogin: () => void;
       spotifyLogout: () => void;
       onSpotifyLoggedIn: (callback: () => void) => void;
       onSpotifyLoggedOut: (callback: () => void) => void;
       onSpotifyLoginError: (callback: (error: string) => void) => void;
-      cacheList: () => Promise<any[]>;
+      cacheList: () => Promise<unknown[]>;
       cacheDelete: (type: string, key: string) => Promise<boolean>;
       cacheClearAll: () => Promise<boolean>;
-      visibilityGet: (key?: string) => Promise<any>;
+      visibilityGet: (key?: string) => Promise<unknown>;
       visibilitySet: (key: string, value: boolean) => Promise<boolean>;
       visibilityReset: () => Promise<boolean>;
       getLaunchAtLogin: () => Promise<boolean>;
@@ -143,15 +190,17 @@ declare global {
       getTrayLyrics: () => Promise<boolean>;
       setTrayLyrics: (enabled: boolean) => Promise<boolean>;
       onOpenSettings: (callback: () => void) => void;
-      logsGetStats: () => Promise<any>;
+      logsGetStats: () => Promise<unknown>;
       logsOpenFolder: () => Promise<boolean>;
       logsClear: () => Promise<boolean>;
-      onTranslationUpdate: (callback: (payload: any) => void) => void;
+      onTranslationUpdate: (callback: (payload: unknown) => void) => void;
       translationGetEnabled: () => Promise<boolean>;
       translationSetEnabled: (enabled: boolean) => Promise<boolean>;
       translationGetTargetLang: () => Promise<string>;
       translationSetTargetLang: (langCode: string) => Promise<boolean>;
-      translationGetLanguages: () => Promise<Array<{ code: string; name: string; rtl: boolean }>>;
+      translationGetLanguages: () => Promise<
+        Array<{ code: string; name: string; rtl: boolean }>
+      >;
       translationRefresh: () => Promise<boolean>;
     };
   }
@@ -177,7 +226,9 @@ const elements = {
   // Vinyl disc elements
   vinylPlayer: document.getElementById('vinylPlayer') as HTMLElement,
   vinylDisc: document.getElementById('vinylDisc') as HTMLElement,
-  vinylProgressFill: document.getElementById('vinylProgressFill') as unknown as SVGPathElement
+  vinylProgressFill: document.getElementById(
+    'vinylProgressFill',
+  ) as unknown as SVGPathElement,
 };
 
 // Progress bar seeking functionality
@@ -186,7 +237,8 @@ let progressBarContainer: HTMLElement | null = null;
 let pendingSeekPosition: number | null = null;
 
 function updateSeekUI(e: MouseEvent): void {
-  if (!currentMusicData || !currentMusicData.duration || !progressBarContainer) return;
+  if (!currentMusicData || !currentMusicData.duration || !progressBarContainer)
+    return;
 
   const rect = progressBarContainer.getBoundingClientRect();
   const clickX = e.clientX - rect.left;
@@ -239,8 +291,12 @@ function initProgressBarSeek(): void {
 }
 
 function updatePlayPauseButton(isPlaying: boolean): void {
-  const playIcon = elements.playPauseBtn.querySelector('.play-icon') as HTMLElement;
-  const pauseIcon = elements.playPauseBtn.querySelector('.pause-icon') as HTMLElement;
+  const playIcon = elements.playPauseBtn.querySelector(
+    '.play-icon',
+  ) as HTMLElement;
+  const pauseIcon = elements.playPauseBtn.querySelector(
+    '.pause-icon',
+  ) as HTMLElement;
 
   if (isPlaying) {
     playIcon.style.display = 'none';
@@ -263,8 +319,8 @@ class VinylDiscController {
   private isPlaying: boolean;
   private readonly centerX = 50;
   private readonly centerY = 50;
-  private readonly innerRadius = 24;  // Start from center (near album art)
-  private readonly outerRadius = 48;  // Expand to edge
+  private readonly innerRadius = 24; // Start from center (near album art)
+  private readonly outerRadius = 48; // Expand to edge
 
   constructor() {
     this.isPlaying = false;
@@ -276,17 +332,19 @@ class VinylDiscController {
    */
   private createArcPath(progress: number): string {
     if (progress <= 0) return '';
-    
+
     const clampedProgress = Math.max(0, Math.min(1, progress));
-    
+
     // Calculate the current radius based on progress
-    const currentRadius = this.innerRadius + (this.outerRadius - this.innerRadius) * clampedProgress;
-    
+    const currentRadius =
+      this.innerRadius +
+      (this.outerRadius - this.innerRadius) * clampedProgress;
+
     // Full circle arc from inner to current radius
     // We draw a donut/ring shape
     const innerR = this.innerRadius;
     const outerR = currentRadius;
-    
+
     // Create a full ring (donut) path
     return `
       M ${this.centerX} ${this.centerY - outerR}
@@ -414,12 +472,15 @@ class LyricsSyncManager {
 
     for (const line of lines) {
       const match = line.match(/^\[(\d{2}):(\d{2})\.(\d{2})\](.*)$/);
-      if (match && match[1] && match[2] && match[3] && match[4] !== undefined) {
+      if (match?.[1] && match[2] && match[3] && match[4] !== undefined) {
         const minutes = match[1];
         const seconds = match[2];
         const centiseconds = match[3];
         const text = match[4];
-        const time = parseInt(minutes) * 60 + parseInt(seconds) + parseInt(centiseconds) / 100;
+        const time =
+          parseInt(minutes, 10) * 60 +
+          parseInt(seconds, 10) +
+          parseInt(centiseconds, 10) / 100;
         lyrics.push({ time, text: text.trim() });
       }
     }
@@ -507,15 +568,23 @@ class LyricsSyncManager {
     const currentLine = this.lyrics[this.currentIndex];
     if (!currentLine) return; // Guard against undefined
 
-    const prevLine = this.currentIndex > 0 ? (this.lyrics[this.currentIndex - 1] || null) : null;
+    const prevLine =
+      this.currentIndex > 0 ? this.lyrics[this.currentIndex - 1] || null : null;
     const nextLine =
-      this.currentIndex < this.lyrics.length - 1 ? (this.lyrics[this.currentIndex + 1] || null) : null;
+      this.currentIndex < this.lyrics.length - 1
+        ? this.lyrics[this.currentIndex + 1] || null
+        : null;
 
     // Get translations for current lines
     const currentTranslation = this.translations[this.currentIndex] || null;
-    const prevTranslation = this.currentIndex > 0 ? (this.translations[this.currentIndex - 1] || null) : null;
+    const prevTranslation =
+      this.currentIndex > 0
+        ? this.translations[this.currentIndex - 1] || null
+        : null;
     const nextTranslation =
-      this.currentIndex < this.translations.length - 1 ? (this.translations[this.currentIndex + 1] || null) : null;
+      this.currentIndex < this.translations.length - 1
+        ? this.translations[this.currentIndex + 1] || null
+        : null;
 
     // Prepare sync data payload
     const syncData: SyncData = {
@@ -530,7 +599,7 @@ class LyricsSyncManager {
       currentTranslation,
       prevTranslation,
       nextTranslation,
-      isTranslationRTL: this.isTranslationRTL
+      isTranslationRTL: this.isTranslationRTL,
     };
 
     // 1. Update main app display (3-line view with word glow)
@@ -566,7 +635,8 @@ class LyricsSyncManager {
    * Detect RTL languages (Arabic, Persian, Hebrew)
    */
   detectRTL(text: string): boolean {
-    const rtlChars = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+    const rtlChars =
+      /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
     return rtlChars.test(text);
   }
 
@@ -596,7 +666,11 @@ class LyricsSyncManager {
   /**
    * Set translations from IPC event
    */
-  setTranslations(data: { translations: string[]; targetLang: string; isTargetRTL: boolean }): void {
+  setTranslations(data: {
+    translations: string[];
+    targetLang: string;
+    isTargetRTL: boolean;
+  }): void {
     if (!data || !data.translations) return;
 
     this.translations = data.translations;
@@ -646,7 +720,7 @@ class LyricsMainDisplay {
       currentText: null,
       previousTranslation: null,
       currentTranslation: null,
-      nextTranslation: null
+      nextTranslation: null,
     };
 
     // Word glow state (managed per current line)
@@ -668,7 +742,7 @@ class LyricsMainDisplay {
       currentText: document.querySelector('#lyricsCurrent .lyrics-text'),
       previousTranslation: document.getElementById('lyricsPreviousTranslation'),
       currentTranslation: document.getElementById('lyricsCurrentTranslation'),
-      nextTranslation: document.getElementById('lyricsNextTranslation')
+      nextTranslation: document.getElementById('lyricsNextTranslation'),
     };
   }
 
@@ -698,7 +772,10 @@ class LyricsMainDisplay {
    * Render translation lines below original lyrics
    */
   renderTranslations(syncData: SyncData): void {
-    const hasTranslation = syncData.currentTranslation || syncData.prevTranslation || syncData.nextTranslation;
+    const hasTranslation =
+      syncData.currentTranslation ||
+      syncData.prevTranslation ||
+      syncData.nextTranslation;
 
     // Show/hide translation container
     if (this.container) {
@@ -711,16 +788,23 @@ class LyricsMainDisplay {
 
     // Update translation text
     if (this.elements.previousTranslation) {
-      this.elements.previousTranslation.textContent = syncData.prevTranslation || '';
-      this.elements.previousTranslation.style.direction = syncData.isTranslationRTL ? 'rtl' : 'ltr';
+      this.elements.previousTranslation.textContent =
+        syncData.prevTranslation || '';
+      this.elements.previousTranslation.style.direction =
+        syncData.isTranslationRTL ? 'rtl' : 'ltr';
     }
     if (this.elements.currentTranslation) {
-      this.elements.currentTranslation.textContent = syncData.currentTranslation || '';
-      this.elements.currentTranslation.style.direction = syncData.isTranslationRTL ? 'rtl' : 'ltr';
+      this.elements.currentTranslation.textContent =
+        syncData.currentTranslation || '';
+      this.elements.currentTranslation.style.direction =
+        syncData.isTranslationRTL ? 'rtl' : 'ltr';
     }
     if (this.elements.nextTranslation) {
-      this.elements.nextTranslation.textContent = syncData.nextTranslation || '';
-      this.elements.nextTranslation.style.direction = syncData.isTranslationRTL ? 'rtl' : 'ltr';
+      this.elements.nextTranslation.textContent =
+        syncData.nextTranslation || '';
+      this.elements.nextTranslation.style.direction = syncData.isTranslationRTL
+        ? 'rtl'
+        : 'ltr';
     }
   }
 
@@ -743,14 +827,14 @@ class LyricsMainDisplay {
       const span = document.createElement('span');
       span.className = 'lyrics-word';
       span.textContent = word;
-      this.elements.currentText!.appendChild(span);
+      this.elements.currentText?.appendChild(span);
 
       this.cachedWords.push(span);
       this.wordStates.push({ glowing: false, intensity: 0 });
 
       // Add space between words
       if (index < words.length - 1) {
-        this.elements.currentText!.appendChild(document.createTextNode(' '));
+        this.elements.currentText?.appendChild(document.createTextNode(' '));
       }
     });
   }
@@ -789,7 +873,11 @@ class LyricsMainDisplay {
       const shouldGlow = wordProgress > 0;
 
       // Fade in effect: 0-0.5 = fade, 0.5-1.0 = full glow
-      const newIntensity = shouldGlow ? (wordProgress > 0.5 ? 1 : wordProgress * 2) : 0;
+      const newIntensity = shouldGlow
+        ? wordProgress > 0.5
+          ? 1
+          : wordProgress * 2
+        : 0;
 
       const state = this.wordStates[index];
       if (!state) return; // Skip if state doesn't exist
@@ -834,9 +922,12 @@ class LyricsMainDisplay {
     if (this.elements.previous) this.elements.previous.textContent = '';
     if (this.elements.currentText) this.elements.currentText.innerHTML = '';
     if (this.elements.next) this.elements.next.textContent = '';
-    if (this.elements.previousTranslation) this.elements.previousTranslation.textContent = '';
-    if (this.elements.currentTranslation) this.elements.currentTranslation.textContent = '';
-    if (this.elements.nextTranslation) this.elements.nextTranslation.textContent = '';
+    if (this.elements.previousTranslation)
+      this.elements.previousTranslation.textContent = '';
+    if (this.elements.currentTranslation)
+      this.elements.currentTranslation.textContent = '';
+    if (this.elements.nextTranslation)
+      this.elements.nextTranslation.textContent = '';
     if (this.container) this.container.classList.remove('has-translation');
     this.cachedWords = [];
     this.wordStates = [];
@@ -874,7 +965,7 @@ class FullLyricsModalDisplay {
       body: null,
       text: null,
       closeBtn: null,
-      openBtn: null
+      openBtn: null,
     };
     this.isOpen = false;
     this.autoScrollEnabled = true;
@@ -886,7 +977,7 @@ class FullLyricsModalDisplay {
       body: document.getElementById('fullLyricsBody'),
       text: document.getElementById('fullLyricsText'),
       closeBtn: document.getElementById('fullLyricsClose'),
-      openBtn: document.getElementById('fullLyricsBtn')
+      openBtn: document.getElementById('fullLyricsBtn'),
     };
 
     // Event listeners
@@ -1042,11 +1133,13 @@ class FullLyricsModalDisplay {
   scrollToCurrentLine(): void {
     if (!this.autoScrollEnabled || !this.elements.text) return;
 
-    const currentLine = this.elements.text.querySelector('.lyrics-line.current');
+    const currentLine = this.elements.text.querySelector(
+      '.lyrics-line.current',
+    );
     if (currentLine) {
       currentLine.scrollIntoView({
         behavior: 'smooth',
-        block: 'center'
+        block: 'center',
       });
     }
   }
@@ -1116,7 +1209,9 @@ function updateInternalPosition(): void {
     elements.currentTime.textContent = formatTime(internalPosition);
 
     // Update vinyl disc progress (circular)
-    vinylDiscController.updateProgress(internalPosition / currentMusicData.duration);
+    vinylDiscController.updateProgress(
+      internalPosition / currentMusicData.duration,
+    );
 
     // ★★★ ATOMIC SYNC ★★★
     // Update position in sync manager (broadcasts to all displays when line changes)
@@ -1147,18 +1242,20 @@ function updateDisplay(data: MusicData | null): void {
 
   if (!data || !data.nowPlayingAvailable) {
     document.body.classList.add('no-music');
-    
+
     // Show appropriate message based on permission state
     if (hasPermissionError) {
       elements.title.textContent = 'Permission Required';
-      elements.artist.textContent = 'LyricGlow needs permission to read music data';
-      elements.album.textContent = 'System Settings → Privacy & Security → Automation → Enable Music for LyricGlow';
+      elements.artist.textContent =
+        'LyricGlow needs permission to read music data';
+      elements.album.textContent =
+        'System Settings → Privacy & Security → Automation → Enable Music for LyricGlow';
     } else {
       elements.title.textContent = 'No music playing';
       elements.artist.textContent = '';
       elements.album.textContent = '';
     }
-    
+
     elements.albumArt.classList.remove('show');
     vinylDiscController.hide();
     elements.progressBar.style.width = '0%';
@@ -1200,10 +1297,12 @@ function updateDisplay(data: MusicData | null): void {
     vinylDiscController.show();
     if (data.spotifyUrl) {
       elements.albumArt.title = 'Open in Spotify';
-      elements.albumArt.onclick = () => window.musicAPI.openExternal(data.spotifyUrl!);
+      elements.albumArt.onclick = () =>
+        window.musicAPI.openExternal(data.spotifyUrl!);
       if (elements.vinylDisc) {
         elements.vinylDisc.title = 'Open in Spotify';
-        elements.vinylDisc.onclick = () => window.musicAPI.openExternal(data.spotifyUrl!);
+        elements.vinylDisc.onclick = () =>
+          window.musicAPI.openExternal(data.spotifyUrl!);
       }
     }
   } else {
@@ -1216,7 +1315,8 @@ function updateDisplay(data: MusicData | null): void {
 
   if (data.duration && data.position !== undefined) {
     const positionDiff = Math.abs(data.position - internalPosition);
-    const needsHardSync = trackChanged || positionDiff > 1.0 || internalPosition === 0;
+    const needsHardSync =
+      trackChanged || positionDiff > 1.0 || internalPosition === 0;
 
     if (needsHardSync) {
       internalPosition = data.position;
@@ -1240,9 +1340,11 @@ function updateDisplay(data: MusicData | null): void {
 }
 
 function updateDetails(data: MusicData): void {
-  elements.year.textContent = data.year && data.year !== '0' ? `Year: ${data.year}` : '';
+  elements.year.textContent =
+    data.year && data.year !== '0' ? `Year: ${data.year}` : '';
   elements.genre.textContent = data.genre ? `Genre: ${data.genre}` : '';
-  elements.bpm.textContent = data.bpm && data.bpm !== 0 ? `${data.bpm} BPM` : '';
+  elements.bpm.textContent =
+    data.bpm && data.bpm !== 0 ? `${data.bpm} BPM` : '';
 
   if (data.playCount && data.playCount !== 0) {
     elements.playCount.textContent = `Played: ${data.playCount} times`;
@@ -1261,8 +1363,7 @@ function updateDetails(data: MusicData): void {
 function clearDetails(): void {
   Object.values(elements).forEach((el) => {
     if (
-      el &&
-      el.id &&
+      el?.id &&
       (el.id === 'year' ||
         el.id === 'genre' ||
         el.id === 'bpm' ||
@@ -1312,7 +1413,11 @@ window.musicAPI.onLyricsUpdate((lyricsData: LyricsData | null) => {
     fullLyricsModalDisplay.refresh();
 
     // Update position if we have valid data
-    if (!isTrackChanging && currentMusicData && currentMusicData.position !== undefined) {
+    if (
+      !isTrackChanging &&
+      currentMusicData &&
+      currentMusicData.position !== undefined
+    ) {
       lyricsSyncManager.updatePosition(internalPosition);
     }
   }
@@ -1321,18 +1426,26 @@ window.musicAPI.onLyricsUpdate((lyricsData: LyricsData | null) => {
 /**
  * Translation IPC handler: Receives async translations from main process
  */
-window.musicAPI.onTranslationUpdate((translationData: { translations: string[]; targetLang: string; isTargetRTL: boolean } | null) => {
-  if (translationData) {
-    lyricsSyncManager.setTranslations(translationData);
-  }
-});
+window.musicAPI.onTranslationUpdate(
+  (
+    translationData: {
+      translations: string[];
+      targetLang: string;
+      isTargetRTL: boolean;
+    } | null,
+  ) => {
+    if (translationData) {
+      lyricsSyncManager.setTranslations(translationData);
+    }
+  },
+);
 
 class MetadataHandler {
   bioExpanded: boolean;
   fullBio: string;
   currentImageIndex: number;
   artistImages: string[];
-  elements: any;
+  elements: MetadataElements;
 
   constructor() {
     this.bioExpanded = false;
@@ -1375,7 +1488,7 @@ class MetadataHandler {
       imageModal: document.getElementById('imageModal'),
       modalImage: document.getElementById('modalImage'),
       modalClose: document.getElementById('modalClose'),
-      modalDownload: document.getElementById('modalDownload')
+      modalDownload: document.getElementById('modalDownload'),
     };
 
     this.elements.bioExpand.addEventListener('click', () => {
@@ -1407,7 +1520,10 @@ class MetadataHandler {
     });
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.elements.imageModal.style.display === 'flex') {
+      if (
+        e.key === 'Escape' &&
+        this.elements.imageModal.style.display === 'flex'
+      ) {
         this.closeModal();
       }
     });
@@ -1425,9 +1541,13 @@ class MetadataHandler {
     if (metadata.artist) {
       let hasInfo = false;
 
-      if (metadata.artist.alternateName && metadata.artist.alternateName.trim() !== '') {
+      if (
+        metadata.artist.alternateName &&
+        metadata.artist.alternateName.trim() !== ''
+      ) {
         this.elements.artistAlternateName.removeAttribute('data-label');
-        this.elements.artistAlternateName.textContent = metadata.artist.alternateName;
+        this.elements.artistAlternateName.textContent =
+          metadata.artist.alternateName;
         this.elements.artistAlternateName.style.display = 'inline-block';
         hasInfo = true;
       } else {
@@ -1479,7 +1599,7 @@ class MetadataHandler {
 
       if (metadata.artist.website && metadata.artist.website.trim() !== '') {
         let url = metadata.artist.website;
-        if (!url.startsWith('http')) url = 'https://' + url;
+        if (!url.startsWith('http')) url = `https://${url}`;
         this.elements.artistWebsite.href = url;
         this.elements.artistWebsite.textContent = '🌐 Website';
         this.elements.artistWebsite.style.display = 'inline-block';
@@ -1495,7 +1615,7 @@ class MetadataHandler {
       ) {
         const fbUrl = metadata.artist.facebook.startsWith('http')
           ? metadata.artist.facebook
-          : 'https://facebook.com/' + metadata.artist.facebook;
+          : `https://facebook.com/${metadata.artist.facebook}`;
         this.elements.artistFacebook.href = fbUrl;
         this.elements.artistFacebook.textContent = '📘 Facebook';
         this.elements.artistFacebook.style.display = 'inline-block';
@@ -1511,7 +1631,7 @@ class MetadataHandler {
       ) {
         const twUrl = metadata.artist.twitter.startsWith('http')
           ? metadata.artist.twitter
-          : 'https://twitter.com/' + metadata.artist.twitter;
+          : `https://twitter.com/${metadata.artist.twitter}`;
         this.elements.artistTwitter.href = twUrl;
         this.elements.artistTwitter.textContent = '🐦 Twitter';
         this.elements.artistTwitter.style.display = 'inline-block';
@@ -1555,7 +1675,7 @@ class MetadataHandler {
       }
 
       // Update bio
-      if (metadata.artist.bio && metadata.artist.bio.summary) {
+      if (metadata.artist.bio?.summary) {
         const summary = metadata.artist.bio.summary;
         this.fullBio = metadata.artist.bio.content || summary;
 
@@ -1581,7 +1701,7 @@ class MetadataHandler {
           artistEl.onclick = () => window.musicAPI.openExternal(artist.url);
           this.elements.similarArtists.appendChild(artistEl);
 
-          if (index < metadata.artist.similar!.length - 1) {
+          if (index < metadata.artist.similar?.length - 1) {
             const separator = document.createTextNode(', ');
             this.elements.similarArtists.appendChild(separator);
           }
@@ -1593,7 +1713,7 @@ class MetadataHandler {
     }
 
     // Update track stats
-    if (metadata.track && metadata.track.playcount) {
+    if (metadata.track?.playcount) {
       this.elements.trackPlaycount.textContent = `🎵 ${metadata.track.playcount} track plays`;
       this.elements.trackPlaycount.style.display = 'inline-block';
     } else {
@@ -1601,7 +1721,7 @@ class MetadataHandler {
     }
 
     // Update artist profile link
-    if (metadata.artist && metadata.artist.url) {
+    if (metadata.artist?.url) {
       this.elements.artistProfile.href = metadata.artist.url;
       this.elements.artistProfile.textContent = '🔗 Artist Profile';
       this.elements.artistProfile.style.display = 'inline-block';
@@ -1639,11 +1759,15 @@ class MetadataHandler {
     }
 
     // Cache all images and filter out failed ones
-    const imageResults = await Promise.all(validImages.map((url) => window.musicAPI.cacheImage(url)));
+    const imageResults = await Promise.all(
+      validImages.map((url) => window.musicAPI.cacheImage(url)),
+    );
 
     const cachedImages = validImages
       .map((url, i) => ({ url, cached: imageResults[i] }))
-      .filter((item): item is { url: string; cached: string } => item.cached !== null);
+      .filter(
+        (item): item is { url: string; cached: string } => item.cached !== null,
+      );
 
     // Only proceed if we have valid cached images
     if (cachedImages.length === 0) {
@@ -1678,7 +1802,7 @@ class MetadataHandler {
       image: string | null;
       artist: string;
       url?: string;
-    }>
+    }>,
   ): Promise<void> {
     if (tracks.length > 0) {
       this.elements.topTracksList.innerHTML = '';
@@ -1714,7 +1838,7 @@ class MetadataHandler {
         trackEl.appendChild(info);
 
         trackEl.onclick = () => {
-          const spotifySearchUrl = `spotify:search:${encodeURIComponent(track.name + ' ' + track.artist)}`;
+          const spotifySearchUrl = `spotify:search:${encodeURIComponent(`${track.name} ${track.artist}`)}`;
           window.musicAPI.openExternal(spotifySearchUrl);
         };
 
@@ -1734,7 +1858,7 @@ class MetadataHandler {
       image: string | null;
       artist: string;
       url: string;
-    }>
+    }>,
   ): Promise<void> {
     if (albums.length > 0) {
       this.elements.topAlbumsGrid.innerHTML = '';
@@ -1837,7 +1961,7 @@ class MetadataHandler {
 
   toggleBio(): void {
     if (this.bioExpanded) {
-      this.elements.bioSummary.textContent = this.fullBio.substring(0, 300) + '...';
+      this.elements.bioSummary.textContent = `${this.fullBio.substring(0, 300)}...`;
       this.elements.bioExpand.textContent = 'Show more';
     } else {
       this.elements.bioSummary.textContent = this.fullBio;
@@ -2038,11 +2162,15 @@ class SettingsHandler {
     this.currentTab = tabName;
 
     document.querySelectorAll('.settings-tab').forEach((tab) => {
-      tab.classList.toggle('active', (tab as HTMLElement).dataset.tab === tabName);
+      tab.classList.toggle(
+        'active',
+        (tab as HTMLElement).dataset.tab === tabName,
+      );
     });
 
     document.querySelectorAll('.settings-section').forEach((section) => {
-      (section as HTMLElement).style.display = section.id === `tab-${tabName}` ? 'block' : 'none';
+      (section as HTMLElement).style.display =
+        section.id === `tab-${tabName}` ? 'block' : 'none';
     });
 
     if (tabName === 'storage') {
@@ -2058,7 +2186,11 @@ class SettingsHandler {
     const clearAllBtn = document.getElementById('cacheClearAllBtn');
     if (clearAllBtn) {
       clearAllBtn.addEventListener('click', async () => {
-        if (confirm('Are you sure you want to clear all caches? This cannot be undone.')) {
+        if (
+          confirm(
+            'Are you sure you want to clear all caches? This cannot be undone.',
+          )
+        ) {
           await window.musicAPI.cacheClearAll();
           await this.loadCacheList();
         }
@@ -2078,7 +2210,11 @@ class SettingsHandler {
 
     if (clearBtn) {
       clearBtn.addEventListener('click', async () => {
-        if (confirm('Are you sure you want to clear all logs? This cannot be undone.')) {
+        if (
+          confirm(
+            'Are you sure you want to clear all logs? This cannot be undone.',
+          )
+        ) {
           const success = await window.musicAPI.logsClear();
           if (success) {
             await this.loadLogsStats();
@@ -2099,14 +2235,16 @@ class SettingsHandler {
       const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
       statsEl.textContent = `${stats.count} log files • ${sizeMB} MB`;
       pathEl.textContent = stats.path;
-    } catch (error) {
+    } catch (_error) {
       statsEl.textContent = 'Unable to load log stats';
       pathEl.textContent = '~/Library/Logs/LyricGlow';
     }
   }
 
   async initLaunchAtLogin(): Promise<void> {
-    const checkbox = document.getElementById('settings-launch-at-login') as HTMLInputElement;
+    const checkbox = document.getElementById(
+      'settings-launch-at-login',
+    ) as HTMLInputElement;
     if (!checkbox) return;
 
     const enabled = await window.musicAPI.getLaunchAtLogin();
@@ -2125,7 +2263,9 @@ class SettingsHandler {
   }
 
   async initTrayLyrics(): Promise<void> {
-    const checkbox = document.getElementById('settings-tray-lyrics') as HTMLInputElement;
+    const checkbox = document.getElementById(
+      'settings-tray-lyrics',
+    ) as HTMLInputElement;
     if (!checkbox) return;
 
     const enabled = await window.musicAPI.getTrayLyrics();
@@ -2144,9 +2284,15 @@ class SettingsHandler {
   }
 
   async initTranslation(): Promise<void> {
-    const checkbox = document.getElementById('settings-translation-enabled') as HTMLInputElement;
-    const select = document.getElementById('settings-translation-lang') as HTMLSelectElement;
-    const langContainer = document.getElementById('translation-lang-container') as HTMLElement;
+    const checkbox = document.getElementById(
+      'settings-translation-enabled',
+    ) as HTMLInputElement;
+    const select = document.getElementById(
+      'settings-translation-lang',
+    ) as HTMLSelectElement;
+    const langContainer = document.getElementById(
+      'translation-lang-container',
+    ) as HTMLElement;
 
     if (!checkbox || !select) return;
 
@@ -2203,7 +2349,7 @@ class SettingsHandler {
   }
 
   async loadCacheList(): Promise<void> {
-    const entries = await window.musicAPI.cacheList();
+    const entries = (await window.musicAPI.cacheList()) as CacheEntry[];
     const statsEl = document.getElementById('cacheStatsText');
     const listEl = document.getElementById('cacheList');
 
@@ -2215,12 +2361,15 @@ class SettingsHandler {
       return;
     }
 
-    const totalSize = entries.reduce((sum: number, e: any) => sum + e.size, 0);
+    const totalSize = entries.reduce(
+      (sum: number, e: CacheEntry) => sum + e.size,
+      0,
+    );
     const totalSizeMB = (totalSize / 1024 / 1024).toFixed(2);
     statsEl.textContent = `${entries.length} items • ${totalSizeMB} MB`;
 
     listEl.innerHTML = '';
-    entries.forEach((entry: any) => {
+    entries.forEach((entry: CacheEntry) => {
       const item = document.createElement('div');
       item.className = 'cache-item';
 
@@ -2241,7 +2390,10 @@ class SettingsHandler {
       const deleteBtn = item.querySelector('.cache-item-delete');
       if (deleteBtn) {
         deleteBtn.addEventListener('click', async () => {
-          const success = await window.musicAPI.cacheDelete(entry.type, entry.key);
+          const success = await window.musicAPI.cacheDelete(
+            entry.type,
+            entry.key,
+          );
           if (success) {
             item.remove();
             await this.loadCacheList();
@@ -2258,7 +2410,7 @@ class SettingsHandler {
       lyrics: '🎵',
       images: '🖼️',
       metadata: '📊',
-      translations: '🌐'
+      translations: '🌐',
     };
     return icons[type] || '📁';
   }
@@ -2269,27 +2421,52 @@ class SettingsHandler {
       const [songArtist, langCode] = key.split(':');
       const langName = this.getLanguageName(langCode || '');
       if (songArtist && langName) {
-        const displayKey = songArtist.length > 35 ? songArtist.substring(0, 32) + '...' : songArtist;
+        const displayKey =
+          songArtist.length > 35
+            ? `${songArtist.substring(0, 32)}...`
+            : songArtist;
         return `${displayKey} → ${langName}`;
       }
     }
 
     if (key.length > 50) {
-      return key.substring(0, 47) + '...';
+      return `${key.substring(0, 47)}...`;
     }
     return key;
   }
 
   getLanguageName(code: string): string {
     const languages: { [key: string]: string } = {
-      en: 'English', es: 'Spanish', fr: 'French', de: 'German',
-      it: 'Italian', pt: 'Portuguese', ru: 'Russian', ja: 'Japanese',
-      ko: 'Korean', zh: 'Chinese', ar: 'Arabic', fa: 'Persian',
-      he: 'Hebrew', hi: 'Hindi', tr: 'Turkish', nl: 'Dutch',
-      pl: 'Polish', sv: 'Swedish', da: 'Danish', no: 'Norwegian',
-      fi: 'Finnish', el: 'Greek', cs: 'Czech', hu: 'Hungarian',
-      ro: 'Romanian', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian',
-      ms: 'Malay', uk: 'Ukrainian'
+      en: 'English',
+      es: 'Spanish',
+      fr: 'French',
+      de: 'German',
+      it: 'Italian',
+      pt: 'Portuguese',
+      ru: 'Russian',
+      ja: 'Japanese',
+      ko: 'Korean',
+      zh: 'Chinese',
+      ar: 'Arabic',
+      fa: 'Persian',
+      he: 'Hebrew',
+      hi: 'Hindi',
+      tr: 'Turkish',
+      nl: 'Dutch',
+      pl: 'Polish',
+      sv: 'Swedish',
+      da: 'Danish',
+      no: 'Norwegian',
+      fi: 'Finnish',
+      el: 'Greek',
+      cs: 'Czech',
+      hu: 'Hungarian',
+      ro: 'Romanian',
+      th: 'Thai',
+      vi: 'Vietnamese',
+      id: 'Indonesian',
+      ms: 'Malay',
+      uk: 'Ukrainian',
     };
     return languages[code] || code.toUpperCase();
   }
@@ -2313,7 +2490,16 @@ class UIVisibilityManager {
   settings: { [key: string]: boolean };
 
   constructor() {
-    this.sections = ['player', 'lyrics', 'images', 'info', 'bio', 'tracks', 'albums', 'similar'];
+    this.sections = [
+      'player',
+      'lyrics',
+      'images',
+      'info',
+      'bio',
+      'tracks',
+      'albums',
+      'similar',
+    ];
     this.settings = {};
   }
 
@@ -2326,7 +2512,8 @@ class UIVisibilityManager {
 
   applyAll(): void {
     this.sections.forEach((section) => {
-      const visible = this.settings[section] !== undefined ? this.settings[section] : true;
+      const visible =
+        this.settings[section] !== undefined ? this.settings[section] : true;
       this.applyVisibility(section, visible);
     });
   }
@@ -2340,9 +2527,12 @@ class UIVisibilityManager {
 
   bindCheckboxes(): void {
     this.sections.forEach((section) => {
-      const checkbox = document.getElementById(`visibility-${section}`) as HTMLInputElement;
+      const checkbox = document.getElementById(
+        `visibility-${section}`,
+      ) as HTMLInputElement;
       if (checkbox) {
-        checkbox.checked = this.settings[section] !== undefined ? this.settings[section] : true;
+        checkbox.checked =
+          this.settings[section] !== undefined ? this.settings[section] : true;
 
         const label = checkbox.closest('.visibility-option');
         if (label) {
@@ -2370,9 +2560,14 @@ class UIVisibilityManager {
         this.settings = await window.musicAPI.visibilityGet();
         this.applyAll();
         this.sections.forEach((section) => {
-          const checkbox = document.getElementById(`visibility-${section}`) as HTMLInputElement;
+          const checkbox = document.getElementById(
+            `visibility-${section}`,
+          ) as HTMLInputElement;
           if (checkbox) {
-            checkbox.checked = this.settings[section] !== undefined ? this.settings[section] : true;
+            checkbox.checked =
+              this.settings[section] !== undefined
+                ? this.settings[section]
+                : true;
           }
         });
       });
@@ -2388,7 +2583,7 @@ function initHorizontalScrolling(): void {
   const horizontalScrollContainers = [
     document.getElementById('topTracksList'),
     document.getElementById('carouselTrack')?.parentElement,
-    document.querySelector('.artist-images-carousel')
+    document.querySelector('.artist-images-carousel'),
   ].filter((el): el is HTMLElement => el !== null);
 
   horizontalScrollContainers.forEach((container) => {
@@ -2400,7 +2595,7 @@ function initHorizontalScrolling(): void {
           container.scrollLeft += e.deltaY;
         }
       },
-      { passive: false }
+      { passive: false },
     );
   });
 }
@@ -2424,7 +2619,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (elements.playPauseBtn) {
     elements.playPauseBtn.addEventListener('click', () => {
-      if (currentMusicData && currentMusicData.nowPlayingAvailable) {
+      if (currentMusicData?.nowPlayingAvailable) {
         window.musicAPI.playPause();
       }
     });
@@ -2432,7 +2627,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (elements.previousBtn) {
     elements.previousBtn.addEventListener('click', () => {
-      if (currentMusicData && currentMusicData.nowPlayingAvailable) {
+      if (currentMusicData?.nowPlayingAvailable) {
         window.musicAPI.previousTrack();
       }
     });
@@ -2440,7 +2635,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (elements.nextBtn) {
     elements.nextBtn.addEventListener('click', () => {
-      if (currentMusicData && currentMusicData.nowPlayingAvailable) {
+      if (currentMusicData?.nowPlayingAvailable) {
         window.musicAPI.nextTrack();
       }
     });

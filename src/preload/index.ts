@@ -5,14 +5,14 @@
  * Provides type-safe communication between main and renderer processes.
  */
 
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
+import { contextBridge, type IpcRendererEvent, ipcRenderer } from 'electron';
 
 // Type definitions for the exposed API
 interface MusicAPI {
   // Music updates
-  onUpdate: (callback: (payload: any) => void) => void;
-  onLyricsUpdate: (callback: (payload: any) => void) => void;
-  onMetadataUpdate: (callback: (payload: any) => void) => void;
+  onUpdate: (callback: (payload: unknown) => void) => void;
+  onLyricsUpdate: (callback: (payload: unknown) => void) => void;
+  onMetadataUpdate: (callback: (payload: unknown) => void) => void;
   onPermissionError: (callback: () => void) => void;
   onPermissionGranted: (callback: () => void) => void;
   updateTrayLyrics: (text: string) => void;
@@ -33,7 +33,7 @@ interface MusicAPI {
 
   // Spotify auth
   spotifyIsLoggedIn: () => Promise<boolean>;
-  spotifyGetUserProfile: () => Promise<any>;
+  spotifyGetUserProfile: () => Promise<unknown>;
   spotifyLogin: () => void;
   spotifyLogout: () => void;
   onSpotifyLoggedIn: (callback: () => void) => void;
@@ -41,12 +41,12 @@ interface MusicAPI {
   onSpotifyLoginError: (callback: (error: string) => void) => void;
 
   // Cache management
-  cacheList: () => Promise<any[]>;
+  cacheList: () => Promise<unknown[]>;
   cacheDelete: (type: string, key: string) => Promise<boolean>;
   cacheClearAll: () => Promise<boolean>;
 
   // Visibility settings
-  visibilityGet: (key?: string) => Promise<any>;
+  visibilityGet: (key?: string) => Promise<unknown>;
   visibilitySet: (key: string, value: boolean) => Promise<boolean>;
   visibilityReset: () => Promise<boolean>;
 
@@ -58,33 +58,40 @@ interface MusicAPI {
   onOpenSettings: (callback: () => void) => void;
 
   // Logs
-  logsGetStats: () => Promise<any>;
+  logsGetStats: () => Promise<unknown>;
   logsOpenFolder: () => Promise<boolean>;
   logsClear: () => Promise<boolean>;
 
   // Translation
-  onTranslationUpdate: (callback: (payload: any) => void) => void;
+  onTranslationUpdate: (callback: (payload: unknown) => void) => void;
   translationGetEnabled: () => Promise<boolean>;
   translationSetEnabled: (enabled: boolean) => Promise<boolean>;
   translationGetTargetLang: () => Promise<string>;
   translationSetTargetLang: (langCode: string) => Promise<boolean>;
-  translationGetLanguages: () => Promise<Array<{ code: string; name: string; rtl: boolean }>>;
+  translationGetLanguages: () => Promise<
+    Array<{ code: string; name: string; rtl: boolean }>
+  >;
   translationRefresh: () => Promise<boolean>;
 }
 
 const musicAPI: MusicAPI = {
   // Music updates
-  onUpdate: (callback: (payload: any) => void) => {
-    ipcRenderer.on('music:update', (_event: IpcRendererEvent, payload: any) => callback(payload));
-  },
-  onLyricsUpdate: (callback: (payload: any) => void) => {
-    ipcRenderer.on('lyrics:update', (_event: IpcRendererEvent, payload: any) =>
-      callback(payload)
+  onUpdate: (callback: (payload: unknown) => void) => {
+    ipcRenderer.on(
+      'music:update',
+      (_event: IpcRendererEvent, payload: unknown) => callback(payload),
     );
   },
-  onMetadataUpdate: (callback: (payload: any) => void) => {
-    ipcRenderer.on('metadata:update', (_event: IpcRendererEvent, payload: any) =>
-      callback(payload)
+  onLyricsUpdate: (callback: (payload: unknown) => void) => {
+    ipcRenderer.on(
+      'lyrics:update',
+      (_event: IpcRendererEvent, payload: unknown) => callback(payload),
+    );
+  },
+  onMetadataUpdate: (callback: (payload: unknown) => void) => {
+    ipcRenderer.on(
+      'metadata:update',
+      (_event: IpcRendererEvent, payload: unknown) => callback(payload),
     );
   },
   onPermissionError: (callback: () => void) => {
@@ -147,8 +154,9 @@ const musicAPI: MusicAPI = {
     ipcRenderer.on('spotify:logged-out', () => callback());
   },
   onSpotifyLoginError: (callback: (error: string) => void) => {
-    ipcRenderer.on('spotify:login-error', (_event: IpcRendererEvent, error: string) =>
-      callback(error)
+    ipcRenderer.on(
+      'spotify:login-error',
+      (_event: IpcRendererEvent, error: string) => callback(error),
     );
   },
 
@@ -203,9 +211,10 @@ const musicAPI: MusicAPI = {
   },
 
   // Translation
-  onTranslationUpdate: (callback: (payload: any) => void) => {
-    ipcRenderer.on('translation:update', (_event: IpcRendererEvent, payload: any) =>
-      callback(payload)
+  onTranslationUpdate: (callback: (payload: unknown) => void) => {
+    ipcRenderer.on(
+      'translation:update',
+      (_event: IpcRendererEvent, payload: unknown) => callback(payload),
     );
   },
   translationGetEnabled: () => {
@@ -225,7 +234,7 @@ const musicAPI: MusicAPI = {
   },
   translationRefresh: () => {
     return ipcRenderer.invoke('translation:refresh');
-  }
+  },
 };
 
 contextBridge.exposeInMainWorld('musicAPI', musicAPI);

@@ -4,8 +4,8 @@
  * Handles downloading and caching album artwork with offline fallback support.
  */
 
-import SecureFetch from '../../shared/utils/SecureFetch';
 import Logger from '../../shared/utils/Logger';
+import SecureFetch from '../../shared/utils/SecureFetch';
 import type UnifiedCacheManager from './UnifiedCacheManager';
 
 class ImageCacheManager {

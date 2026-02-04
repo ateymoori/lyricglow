@@ -5,8 +5,8 @@
  * Implements rate limiting (500ms) and offline fallback support.
  */
 
-import SecureFetch from '../../shared/utils/SecureFetch';
 import Logger from '../../shared/utils/Logger';
+import SecureFetch from '../../shared/utils/SecureFetch';
 import type UnifiedCacheManager from './UnifiedCacheManager';
 
 // TheAudioDB API response interface
@@ -52,7 +52,7 @@ interface AudioDBSearchResponse {
 }
 
 // Parsed artist data structure
-export interface AudioDBArtistData {
+interface AudioDBArtistData {
   name: string;
   alternateName: string | null;
   country: string | null;
@@ -88,7 +88,7 @@ export interface AudioDBArtistData {
   musicBrainzId: string | null;
 }
 
-export interface AudioDBMetadata {
+interface AudioDBMetadata {
   artist: AudioDBArtistData | null;
 }
 
@@ -107,12 +107,12 @@ class TheAudioDBManager {
     this.minRequestInterval = 500;
   }
 
-  private async makeRequest(endpoint: string): Promise<any> {
+  private async makeRequest(endpoint: string): Promise<unknown> {
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
     if (timeSinceLastRequest < this.minRequestInterval) {
       await new Promise((resolve) =>
-        setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest)
+        setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest),
       );
     }
     this.lastRequestTime = Date.now();
@@ -123,8 +123,8 @@ class TheAudioDBManager {
       const response = await SecureFetch.fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'LyricGlow/1.0'
-        }
+          'User-Agent': 'LyricGlow/1.0',
+        },
       });
 
       if (!response.ok) {
@@ -158,9 +158,9 @@ class TheAudioDBManager {
     if (
       response &&
       (response as AudioDBSearchResponse).artists &&
-      (response as AudioDBSearchResponse).artists!.length > 0
+      (response as AudioDBSearchResponse).artists?.length > 0
     ) {
-      const artist = (response as AudioDBSearchResponse).artists![0];
+      const artist = (response as AudioDBSearchResponse).artists?.[0];
       if (artist) {
         const parsedData = this.parseArtistData(artist);
 
@@ -183,7 +183,7 @@ class TheAudioDBManager {
       artist.strArtistFanart3,
       artist.strArtistFanart4,
       artist.strArtistWideThumb,
-      artist.strArtistBanner
+      artist.strArtistBanner,
     ].filter((img): img is string => img !== null && img !== '');
 
     return {
@@ -209,7 +209,7 @@ class TheAudioDBManager {
         pt: artist.strBiographyPT,
         it: artist.strBiographyIT,
         jp: artist.strBiographyJP,
-        ru: artist.strBiographyRU
+        ru: artist.strBiographyRU,
       },
       website: artist.strWebsite,
       facebook: artist.strFacebook,
@@ -219,14 +219,14 @@ class TheAudioDBManager {
       logo: artist.strArtistLogo,
       clearart: artist.strArtistClearart,
       banner: artist.strArtistBanner,
-      musicBrainzId: artist.strMusicBrainzID
+      musicBrainzId: artist.strMusicBrainzID,
     };
   }
 
   private truncateBio(text: string | null, limit: number = 300): string | null {
     if (!text) return null;
     if (text.length <= limit) return text;
-    return text.substring(0, limit) + '...';
+    return `${text.substring(0, limit)}...`;
   }
 
   async fetchMetadata(artistName: string): Promise<AudioDBMetadata | null> {
@@ -243,7 +243,7 @@ class TheAudioDBManager {
       }
 
       return {
-        artist: artistData
+        artist: artistData,
       };
     } catch (error) {
       Logger.metadata.error('TheAudioDB fetch failed', error as Error);

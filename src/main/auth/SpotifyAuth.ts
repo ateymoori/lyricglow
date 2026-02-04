@@ -5,13 +5,13 @@
  * Handles token storage with encryption, auto-refresh, and user profile.
  */
 
-import crypto from 'crypto';
-import https from 'https';
-import fs from 'fs';
-import path from 'path';
-import { shell, safeStorage } from 'electron';
-import Logger from '../../shared/utils/Logger';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import https from 'node:https';
+import path from 'node:path';
+import { safeStorage, shell } from 'electron';
 import type Store from 'electron-store';
+import Logger from '../../shared/utils/Logger';
 
 // Spotify API response interfaces
 interface SpotifyTokenResponse {
@@ -39,7 +39,7 @@ interface TokenData {
   expires_at: number;
 }
 
-export interface UserProfile {
+interface UserProfile {
   displayName: string;
   email: string | null;
   imageUrl: string | null;
@@ -123,7 +123,7 @@ class SpotifyAuth {
       code_challenge_method: 'S256',
       code_challenge: codeChallenge,
       scope: scopes.join(' '),
-      state: crypto.randomBytes(16).toString('hex')
+      state: crypto.randomBytes(16).toString('hex'),
     });
 
     return `https://accounts.spotify.com/authorize?${params.toString()}`;
@@ -139,7 +139,9 @@ class SpotifyAuth {
     await shell.openExternal(authUrl);
   }
 
-  private async exchangeCodeForToken(code: string): Promise<SpotifyTokenResponse> {
+  private async exchangeCodeForToken(
+    code: string,
+  ): Promise<SpotifyTokenResponse> {
     if (!this.codeVerifier) {
       throw new Error('Code verifier not found. Start auth flow first.');
     }
@@ -149,13 +151,15 @@ class SpotifyAuth {
       grant_type: 'authorization_code',
       code: code,
       redirect_uri: this.redirectUri,
-      code_verifier: this.codeVerifier
+      code_verifier: this.codeVerifier,
     });
 
     return this.makeTokenRequest(params);
   }
 
-  private makeTokenRequest(params: URLSearchParams): Promise<SpotifyTokenResponse> {
+  private makeTokenRequest(
+    params: URLSearchParams,
+  ): Promise<SpotifyTokenResponse> {
     return new Promise((resolve, reject) => {
       const postData = params.toString();
 
@@ -165,8 +169,8 @@ class SpotifyAuth {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'Content-Length': Buffer.byteLength(postData)
-        }
+          'Content-Length': Buffer.byteLength(postData),
+        },
       };
 
       const req = https.request(options, (res) => {
@@ -200,13 +204,17 @@ class SpotifyAuth {
     });
   }
 
-  private storeTokens(accessToken: string, refreshToken: string, expiresIn: number): void {
+  private storeTokens(
+    accessToken: string,
+    refreshToken: string,
+    expiresIn: number,
+  ): void {
     if (!this.store) return;
 
     const tokenData: TokenData = {
       access_token: accessToken,
       refresh_token: refreshToken,
-      expires_at: Date.now() + expiresIn * 1000
+      expires_at: Date.now() + expiresIn * 1000,
     };
 
     const encrypted = safeStorage.encryptString(JSON.stringify(tokenData));
@@ -236,7 +244,7 @@ class SpotifyAuth {
   isLoggedIn(): boolean {
     if (!this.store) return false;
     const tokens = this.getStoredTokens();
-    return !!(tokens && tokens.refresh_token);
+    return !!tokens?.refresh_token;
   }
 
   async getAccessToken(): Promise<string | null> {
@@ -266,7 +274,7 @@ class SpotifyAuth {
     const params = new URLSearchParams({
       client_id: this.clientId!,
       grant_type: 'refresh_token',
-      refresh_token: tokens.refresh_token
+      refresh_token: tokens.refresh_token,
     });
 
     try {
@@ -276,7 +284,7 @@ class SpotifyAuth {
       this.storeTokens(
         response.access_token,
         response.refresh_token || tokens.refresh_token,
-        response.expires_in
+        response.expires_in,
       );
 
       Logger.auth.info('Token refreshed successfully');
@@ -293,15 +301,18 @@ class SpotifyAuth {
     }
 
     // Refresh every 55 minutes (access token valid for 60 minutes)
-    this.tokenRefreshInterval = setInterval(async () => {
-      if (this.isLoggedIn()) {
-        try {
-          await this.refreshAccessToken();
-        } catch (error) {
-          Logger.auth.error('Auto-refresh failed', error as Error);
+    this.tokenRefreshInterval = setInterval(
+      async () => {
+        if (this.isLoggedIn()) {
+          try {
+            await this.refreshAccessToken();
+          } catch (error) {
+            Logger.auth.error('Auto-refresh failed', error as Error);
+          }
         }
-      }
-    }, 55 * 60 * 1000);
+      },
+      55 * 60 * 1000,
+    );
   }
 
   stopAutoRefresh(): void {
@@ -337,7 +348,11 @@ class SpotifyAuth {
       const response = await this.exchangeCodeForToken(code);
 
       // Store tokens securely
-      this.storeTokens(response.access_token, response.refresh_token!, response.expires_in);
+      this.storeTokens(
+        response.access_token,
+        response.refresh_token!,
+        response.expires_in,
+      );
 
       // Start auto-refresh
       this.startAutoRefresh();
@@ -363,8 +378,8 @@ class SpotifyAuth {
         path: '/v1/me',
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${accessToken}`
-        }
+          Authorization: `Bearer ${accessToken}`,
+        },
       };
 
       const req = https.request(options, (res) => {
@@ -382,14 +397,18 @@ class SpotifyAuth {
                 displayName: profile.display_name || profile.id,
                 email: profile.email || null,
                 imageUrl:
-                  profile.images && profile.images.length > 0 && profile.images[0]
+                  profile.images &&
+                  profile.images.length > 0 &&
+                  profile.images[0]
                     ? profile.images[0].url
                     : null,
                 country: profile.country || null,
-                product: profile.product || null
+                product: profile.product || null,
               });
             } else {
-              Logger.auth.error('Spotify API error', { statusCode: res.statusCode });
+              Logger.auth.error('Spotify API error', {
+                statusCode: res.statusCode,
+              });
               resolve(null);
             }
           } catch (error) {

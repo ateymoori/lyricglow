@@ -5,7 +5,7 @@
  * Features: Batch translation, caching, fallback instances, RTL detection.
  */
 
-import https from 'https';
+import https from 'node:https';
 import Logger from '../../shared/utils/Logger';
 import type UnifiedCacheManager from './UnifiedCacheManager';
 
@@ -14,11 +14,15 @@ const LINGVA_INSTANCES = [
   'lingva.ml',
   'translate.plausibility.cloud',
   'lingva.lunar.icu',
-  'translate.projectsegfau.lt'
+  'translate.projectsegfau.lt',
 ];
 
 // Supported languages with display names (40 most popular, sorted alphabetically)
-export const SUPPORTED_LANGUAGES: { code: string; name: string; rtl: boolean }[] = [
+export const SUPPORTED_LANGUAGES: {
+  code: string;
+  name: string;
+  rtl: boolean;
+}[] = [
   { code: 'af', name: 'Afrikaans', rtl: false },
   { code: 'ar', name: 'Arabic', rtl: true },
   { code: 'bn', name: 'Bengali', rtl: false },
@@ -61,10 +65,10 @@ export const SUPPORTED_LANGUAGES: { code: string; name: string; rtl: boolean }[]
   { code: 'tr', name: 'Turkish', rtl: false },
   { code: 'uk', name: 'Ukrainian', rtl: false },
   { code: 'ur', name: 'Urdu', rtl: true },
-  { code: 'vi', name: 'Vietnamese', rtl: false }
+  { code: 'vi', name: 'Vietnamese', rtl: false },
 ];
 
-export interface TranslationResult {
+interface TranslationResult {
   original: string[];
   translated: string[];
   targetLang: string;
@@ -87,12 +91,15 @@ class TranslationManager {
   async translateBatch(
     lines: string[],
     targetLang: string,
-    cacheKey: string
+    cacheKey: string,
   ): Promise<TranslationResult | null> {
     if (!lines.length || !targetLang) return null;
 
     // Check cache first
-    const cached = await this.cache.get('translations', `${cacheKey}:${targetLang}`);
+    const cached = await this.cache.get(
+      'translations',
+      `${cacheKey}:${targetLang}`,
+    );
     if (cached) {
       Logger.lyrics.debug(`Translation cache hit: ${cacheKey}`);
       return cached as TranslationResult;
@@ -114,7 +121,10 @@ class TranslationManager {
 
     // Translate batch
     const startTime = Date.now();
-    const translatedBatch = await this.translateWithFallback(batchText, targetLang);
+    const translatedBatch = await this.translateWithFallback(
+      batchText,
+      targetLang,
+    );
     const duration = Date.now() - startTime;
 
     if (!translatedBatch) {
@@ -122,7 +132,9 @@ class TranslationManager {
       return null;
     }
 
-    Logger.lyrics.info(`Translation done (${duration}ms): ${cacheKey} → ${targetLang}`);
+    Logger.lyrics.info(
+      `Translation done (${duration}ms): ${cacheKey} → ${targetLang}`,
+    );
 
     // Split translated text back into lines
     const translatedParts = translatedBatch.split(separator);
@@ -141,7 +153,7 @@ class TranslationManager {
       original: lines,
       translated,
       targetLang,
-      isTargetRTL
+      isTargetRTL,
     };
 
     // Cache the result
@@ -153,11 +165,15 @@ class TranslationManager {
   /**
    * Translate text using Lingva API with fallback instances
    */
-  private async translateWithFallback(text: string, targetLang: string): Promise<string | null> {
+  private async translateWithFallback(
+    text: string,
+    targetLang: string,
+  ): Promise<string | null> {
     const maxRetries = LINGVA_INSTANCES.length;
 
     for (let i = 0; i < maxRetries; i++) {
-      const instanceIndex = (this.currentInstance + i) % LINGVA_INSTANCES.length;
+      const instanceIndex =
+        (this.currentInstance + i) % LINGVA_INSTANCES.length;
       const instance = LINGVA_INSTANCES[instanceIndex];
 
       if (!instance) continue;
@@ -170,7 +186,9 @@ class TranslationManager {
         return result;
       }
 
-      Logger.lyrics.debug(`Lingva instance failed: ${instance}, trying next...`);
+      Logger.lyrics.debug(
+        `Lingva instance failed: ${instance}, trying next...`,
+      );
     }
 
     return null;
@@ -179,7 +197,11 @@ class TranslationManager {
   /**
    * Make request to Lingva API
    */
-  private lingvaRequest(instance: string, text: string, targetLang: string): Promise<string | null> {
+  private lingvaRequest(
+    instance: string,
+    text: string,
+    targetLang: string,
+  ): Promise<string | null> {
     return new Promise((resolve) => {
       const encodedText = encodeURIComponent(text);
       const path = `/api/v1/auto/${targetLang}/${encodedText}`;
@@ -190,8 +212,8 @@ class TranslationManager {
         method: 'GET',
         timeout: 15000,
         headers: {
-          'User-Agent': 'LyricGlow/1.0'
-        }
+          'User-Agent': 'LyricGlow/1.0',
+        },
       };
 
       const req = https.request(options, (res) => {

@@ -9,7 +9,7 @@
  * Note: Manual download only (no auto-update, no code signing needed)
  */
 
-import { app, shell, dialog } from 'electron';
+import { app, dialog, shell } from 'electron';
 import Logger from '../../shared/utils/Logger';
 
 interface GitHubRelease {
@@ -36,7 +36,8 @@ interface UpdateInfo {
 
 class UpdateManager {
   private readonly repo = 'ateymoori/lyricglow';
-  private readonly apiUrl = `https://api.github.com/repos/${this.repo}/releases/latest`;
+  private readonly apiUrl =
+    `https://api.github.com/repos/${this.repo}/releases/latest`;
 
   /**
    * Check if a new version is available
@@ -50,8 +51,8 @@ class UpdateManager {
       const response = await fetch(this.apiUrl, {
         headers: {
           Accept: 'application/vnd.github.v3+json',
-          'User-Agent': 'LyricGlow'
-        }
+          'User-Agent': 'LyricGlow',
+        },
       });
 
       if (!response.ok) {
@@ -64,7 +65,7 @@ class UpdateManager {
       const available = this.isNewerVersion(currentVersion, latestVersion);
 
       Logger.app.info(
-        `Update check: current=${currentVersion}, latest=${latestVersion}, available=${available}`
+        `Update check: current=${currentVersion}, latest=${latestVersion}, available=${available}`,
       );
 
       return {
@@ -73,7 +74,7 @@ class UpdateManager {
         latestVersion,
         releaseUrl: release.html_url,
         changelog: release.body || 'No changelog available',
-        publishedAt: release.published_at
+        publishedAt: release.published_at,
       };
     } catch (error) {
       Logger.app.error('Update check failed', error as Error);
@@ -109,7 +110,7 @@ class UpdateManager {
         title: 'No Updates Available',
         message: 'You are running the latest version',
         detail: `Current version: ${updateInfo.currentVersion}`,
-        buttons: ['OK']
+        buttons: ['OK'],
       });
       return;
     }
@@ -121,7 +122,7 @@ class UpdateManager {
       detail: `You are currently running version ${updateInfo.currentVersion}\n\nChanges:\n${this.cleanChangelog(updateInfo.changelog)}`,
       buttons: ['Download', 'Later'],
       defaultId: 0,
-      cancelId: 1
+      cancelId: 1,
     });
 
     if (result.response === 0) {
@@ -145,7 +146,7 @@ class UpdateManager {
 
     // Truncate if too long
     if (cleaned.length > 200) {
-      cleaned = cleaned.substring(0, 197) + '...';
+      cleaned = `${cleaned.substring(0, 197)}...`;
     }
 
     return cleaned;

@@ -5,11 +5,11 @@
  * Implements smart caching with offline fallback support.
  */
 
-import SecureFetch from '../../shared/utils/SecureFetch';
 import Logger from '../../shared/utils/Logger';
+import SecureFetch from '../../shared/utils/SecureFetch';
 
 // Lyrics data structure
-export interface LyricsData {
+interface LyricsData {
   synced: string | null;
   plain: string | null;
   instrumental: boolean;
@@ -27,8 +27,8 @@ interface LRCLibResult {
 
 // Cache interface matching UnifiedCacheManager
 interface CacheManager {
-  get(type: string, key: string): Promise<any>;
-  set(type: string, key: string, value: any): Promise<boolean>;
+  get(type: string, key: string): Promise<unknown>;
+  set(type: string, key: string, value: unknown): Promise<boolean>;
 }
 
 class LyricsManager {
@@ -57,7 +57,9 @@ class LyricsManager {
 
     if (fetched) {
       const hasSync = fetched.synced ? 'yes' : 'no';
-      Logger.lyrics.info(`Found (${duration}ms, synced: ${hasSync}): ${title} - ${artist}`);
+      Logger.lyrics.info(
+        `Found (${duration}ms, synced: ${hasSync}): ${title} - ${artist}`,
+      );
       this.cache.set('lyrics', cacheKey, fetched);
       return fetched;
     }
@@ -69,7 +71,10 @@ class LyricsManager {
     return offlineCache;
   }
 
-  private async fetchFromAPI(title: string, artist: string): Promise<LyricsData | null> {
+  private async fetchFromAPI(
+    title: string,
+    artist: string,
+  ): Promise<LyricsData | null> {
     try {
       const query = encodeURIComponent(`${title} ${artist}`);
       const url = `https://lrclib.net/api/search?q=${query}`;
@@ -77,8 +82,8 @@ class LyricsManager {
       const response = await SecureFetch.fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'LyricGlow/1.0'
-        }
+          'User-Agent': 'LyricGlow/1.0',
+        },
       });
 
       if (!response.ok) {
@@ -86,7 +91,7 @@ class LyricsManager {
         return null;
       }
 
-      const results = await response.json() as LRCLibResult[];
+      const results = (await response.json()) as LRCLibResult[];
 
       if (!results || results.length === 0) {
         return null;
@@ -98,7 +103,7 @@ class LyricsManager {
         return {
           synced: exactMatch.syncedLyrics,
           plain: exactMatch.plainLyrics || null,
-          instrumental: exactMatch.instrumental || false
+          instrumental: exactMatch.instrumental || false,
         };
       }
 
@@ -109,13 +114,18 @@ class LyricsManager {
     }
   }
 
-  private findBestMatch(results: LRCLibResult[], title: string, artist: string): LRCLibResult | null {
-    const normalize = (str: string): string => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+  private findBestMatch(
+    results: LRCLibResult[],
+    title: string,
+    artist: string,
+  ): LRCLibResult | null {
+    const normalize = (str: string): string =>
+      str.toLowerCase().replace(/[^a-z0-9]/g, '');
     const targetTitle = normalize(title);
     const targetArtist = normalize(artist);
 
     // Try exact match
-    const exactMatch = results.find(item => {
+    const exactMatch = results.find((item) => {
       const itemTitle = normalize(item.trackName || item.name || '');
       const itemArtist = normalize(item.artistName || '');
       return itemTitle === targetTitle && itemArtist === targetArtist;
@@ -124,7 +134,7 @@ class LyricsManager {
     if (exactMatch) return exactMatch;
 
     // Try title-only match
-    const titleMatch = results.find(item => {
+    const titleMatch = results.find((item) => {
       const itemTitle = normalize(item.trackName || item.name || '');
       return itemTitle === targetTitle;
     });

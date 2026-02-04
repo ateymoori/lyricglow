@@ -6,8 +6,8 @@
  * Preserves existing clean architecture and SSL handling logic.
  */
 
-import https from 'https';
-import fetch, { RequestInit, Response } from 'node-fetch';
+import https from 'node:https';
+import fetch, { type RequestInit, type Response } from 'node-fetch';
 import Logger from './Logger';
 
 type ConnectionMode = 'untested' | 'secure' | 'corporate-vpn';
@@ -19,21 +19,26 @@ class SecureFetch {
   /**
    * Fetch with automatic SSL fallback
    */
-  async fetch(url: string, options: RequestInit = {}): Promise<Response> {
-    const timeoutMs = (options as any).timeout || 10000;
+  async fetch(
+    url: string,
+    options: RequestInit & { timeout?: number } = {},
+  ): Promise<Response> {
+    const timeoutMs = options.timeout || 10000;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await this.fetchSecure(url, {
         ...options,
-        signal: controller.signal
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
       if (!this.hasTestedConnection) {
-        Logger.app.info('Secure connection successful (SSL verification enabled)');
+        Logger.app.info(
+          'Secure connection successful (SSL verification enabled)',
+        );
         this.hasTestedConnection = true;
       }
 
@@ -41,28 +46,35 @@ class SecureFetch {
     } catch (error) {
       clearTimeout(timeoutId);
 
-      if ((error as any).name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
         const timeoutError = new Error(`Request timeout after ${timeoutMs}ms`);
         Logger.app.error('Request timeout', { url, timeout: timeoutMs });
         throw timeoutError;
       }
 
       if (this.isSSLError(error as Error)) {
-        Logger.app.warn('SSL verification failed, retrying with bypass (corporate VPN detected)');
+        Logger.app.warn(
+          'SSL verification failed, retrying with bypass (corporate VPN detected)',
+        );
 
         const retryController = new AbortController();
-        const retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs);
+        const retryTimeoutId = setTimeout(
+          () => retryController.abort(),
+          timeoutMs,
+        );
 
         try {
           const response = await this.fetchInsecure(url, {
             ...options,
-            signal: retryController.signal
+            signal: retryController.signal,
           });
 
           clearTimeout(retryTimeoutId);
 
           if (!this.sslBypassEnabled) {
-            Logger.app.info('Connection successful with SSL bypass (corporate VPN mode)');
+            Logger.app.info(
+              'Connection successful with SSL bypass (corporate VPN mode)',
+            );
             this.sslBypassEnabled = true;
           }
 
@@ -70,13 +82,24 @@ class SecureFetch {
         } catch (fallbackError) {
           clearTimeout(retryTimeoutId);
 
-          if ((fallbackError as any).name === 'AbortError') {
-            const timeoutError = new Error(`Request timeout after ${timeoutMs}ms`);
-            Logger.app.error('Request timeout on SSL bypass', { url, timeout: timeoutMs });
+          if (
+            fallbackError instanceof Error &&
+            fallbackError.name === 'AbortError'
+          ) {
+            const timeoutError = new Error(
+              `Request timeout after ${timeoutMs}ms`,
+            );
+            Logger.app.error('Request timeout on SSL bypass', {
+              url,
+              timeout: timeoutMs,
+            });
             throw timeoutError;
           }
 
-          Logger.app.error('Both secure and insecure connection attempts failed', fallbackError as Error);
+          Logger.app.error(
+            'Both secure and insecure connection attempts failed',
+            fallbackError as Error,
+          );
           throw fallbackError;
         }
       }
@@ -88,24 +111,30 @@ class SecureFetch {
   /**
    * Fetch with SSL verification enabled (secure)
    */
-  private async fetchSecure(url: string, options: RequestInit): Promise<Response> {
+  private async fetchSecure(
+    url: string,
+    options: RequestInit,
+  ): Promise<Response> {
     return fetch(url, {
       ...options,
       agent: new https.Agent({
-        rejectUnauthorized: true // SSL verification ON
-      })
+        rejectUnauthorized: true, // SSL verification ON
+      }),
     });
   }
 
   /**
    * Fetch with SSL verification disabled (insecure fallback)
    */
-  private async fetchInsecure(url: string, options: RequestInit): Promise<Response> {
+  private async fetchInsecure(
+    url: string,
+    options: RequestInit,
+  ): Promise<Response> {
     return fetch(url, {
       ...options,
       agent: new https.Agent({
-        rejectUnauthorized: false // SSL verification OFF
-      })
+        rejectUnauthorized: false, // SSL verification OFF
+      }),
     });
   }
 
@@ -120,14 +149,14 @@ class SecureFetch {
       'UNABLE_TO_GET_ISSUER_CERT',
       'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
       'CERT_UNTRUSTED',
-      'DEPTH_ZERO_SELF_SIGNED_CERT'
+      'DEPTH_ZERO_SELF_SIGNED_CERT',
     ];
 
     const errorMessage = error.message || '';
-    const errorCode = (error as any).code || '';
+    const errorCode = (error as NodeJS.ErrnoException).code || '';
 
-    return sslErrorCodes.some(code =>
-      errorMessage.includes(code) || errorCode === code
+    return sslErrorCodes.some(
+      (code) => errorMessage.includes(code) || errorCode === code,
     );
   }
 

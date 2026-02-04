@@ -18,17 +18,8 @@ build/icon.svg.png
 *.log
 logs/
 
-# Development notes
-TASKS.md
-AWESOME_REPOSITORIES.md
-ENHANCEMENTS.md
-EXECUTE_NOW.md
-LYRICGLOW_ENTRY.json
-QUICK_START_GUIDE.md
-SUBMISSION.md
-SUBMISSION_SUCCESS.md
-SUBMISSION_SUMMARY.md
-SUBMISSION_TRACKER.md
+# Documentation (only README allowed)
+docs/
 *.md
 !README.md
 
