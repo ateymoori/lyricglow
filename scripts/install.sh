@@ -46,10 +46,10 @@ fi
 ARCH=$(uname -m)
 if [[ "$ARCH" == "arm64" ]]; then
     DMG_ARCH="arm64"
-    echo -e "${GREEN}*${NC} Detected: Apple Silicon (M1/M2/M3/M4)"
+    echo -e "${GREEN}✓${NC} Detected: Apple Silicon (M1/M2/M3/M4)"
 elif [[ "$ARCH" == "x86_64" ]]; then
     DMG_ARCH="x64"
-    echo -e "${GREEN}*${NC} Detected: Intel Mac"
+    echo -e "${GREEN}✓${NC} Detected: Intel Mac"
 else
     echo -e "${RED}Error: Unsupported architecture: $ARCH${NC}"
     exit 1
@@ -62,15 +62,23 @@ if ! command -v curl &> /dev/null; then
 fi
 
 # Fetch latest release version from GitHub API
-echo -e "${BLUE}*${NC} Checking latest version..."
-RELEASE_INFO=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null)
+echo -e "${BLUE}→${NC} Checking latest version..."
+RELEASE_INFO=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null) || {
+    echo -e "${RED}Error: Could not connect to GitHub${NC}"
+    exit 1
+}
 
 if [[ -z "$RELEASE_INFO" ]]; then
-    echo -e "${RED}Error: Could not connect to GitHub${NC}"
+    echo -e "${RED}Error: Empty response from GitHub${NC}"
     exit 1
 fi
 
-LATEST_TAG=$(echo "$RELEASE_INFO" | grep '"tag_name":' | sed -n '1p' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+# Parse tag_name - try jq first, fallback to grep/sed
+if command -v jq &> /dev/null; then
+    LATEST_TAG=$(echo "$RELEASE_INFO" | jq -r '.tag_name // empty')
+else
+    LATEST_TAG=$(echo "$RELEASE_INFO" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+fi
 
 if [[ -z "$LATEST_TAG" ]]; then
     echo -e "${RED}Error: Could not find latest release${NC}"
@@ -89,17 +97,24 @@ fi
 # Compare versions
 if [[ -n "$CURRENT_VERSION" ]]; then
     if [[ "$CURRENT_VERSION" == "$VERSION" ]]; then
-        echo -e "${GREEN}*${NC} Already up to date: ${BOLD}v$VERSION${NC}"
+        echo -e "${GREEN}✓${NC} Already up to date: ${BOLD}v$VERSION${NC}"
         echo ""
         echo -e "LyricGlow is already at the latest version."
         echo -e "To reinstall, first remove: ${BOLD}rm -rf /Applications/LyricGlow.app${NC}"
         echo ""
         exit 0
     else
-        echo -e "${YELLOW}*${NC} Installed: v$CURRENT_VERSION → Latest: ${BOLD}v$VERSION${NC}"
+        echo -e "${YELLOW}→${NC} Update available: v$CURRENT_VERSION → ${BOLD}v$VERSION${NC}"
     fi
 else
-    echo -e "${GREEN}*${NC} Latest version: ${BOLD}v$VERSION${NC}"
+    echo -e "${GREEN}✓${NC} Latest version: ${BOLD}v$VERSION${NC}"
+fi
+
+# Check if app is currently running
+if pgrep -x "$APP_NAME" > /dev/null 2>&1; then
+    echo -e "${YELLOW}→${NC} Stopping running instance..."
+    pkill -x "$APP_NAME" 2>/dev/null || true
+    sleep 1
 fi
 
 # Build download URL
@@ -121,42 +136,61 @@ cleanup() {
 trap cleanup EXIT
 
 # Download DMG
-echo -e "${BLUE}*${NC} Downloading ${DMG_NAME}..."
+echo -e "${BLUE}→${NC} Downloading ${DMG_NAME}..."
 if ! curl -fSL --progress-bar -o "$DMG_PATH" "$DOWNLOAD_URL"; then
     echo -e "${RED}Error: Download failed${NC}"
     echo -e "${YELLOW}URL: $DOWNLOAD_URL${NC}"
     exit 1
 fi
-echo -e "${GREEN}*${NC} Download complete"
 
-# Mount DMG and capture mount point
-echo -e "${BLUE}*${NC} Mounting disk image..."
-MOUNT_OUTPUT=$(hdiutil attach "$DMG_PATH" -nobrowse 2>&1)
-if [[ $? -ne 0 ]]; then
-    echo -e "${RED}Error: Failed to mount disk image${NC}"
+# Verify download (check file exists and has reasonable size > 10MB)
+DMG_SIZE=$(stat -f%z "$DMG_PATH" 2>/dev/null || echo "0")
+if [[ "$DMG_SIZE" -lt 10000000 ]]; then
+    echo -e "${RED}Error: Downloaded file is too small (corrupted?)${NC}"
     exit 1
 fi
+echo -e "${GREEN}✓${NC} Download complete ($(echo "scale=1; $DMG_SIZE/1048576" | bc)MB)"
 
-# Extract mount point from hdiutil output (last column of last line)
-MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | grep "/Volumes/" | sed -E 's|.*/Volumes/|/Volumes/|' | tr -d '\t')
+# Mount DMG
+echo -e "${BLUE}→${NC} Mounting disk image..."
+MOUNT_OUTPUT=$(hdiutil attach "$DMG_PATH" -nobrowse -readonly 2>&1) || {
+    echo -e "${RED}Error: Failed to mount disk image${NC}"
+    echo "$MOUNT_OUTPUT"
+    exit 1
+}
+
+# Extract mount point (look for /Volumes/ in output)
+MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | awk '/\/Volumes\// {for(i=1;i<=NF;i++) if($i ~ /^\/Volumes/) {p=$i; for(j=i+1;j<=NF;j++) p=p" "$j; print p; exit}}')
+
+if [[ -z "$MOUNT_POINT" ]] || [[ ! -d "$MOUNT_POINT" ]]; then
+    # Fallback: find any recently mounted LyricGlow volume
+    MOUNT_POINT=$(find /Volumes -maxdepth 1 -name "*LyricGlow*" -type d 2>/dev/null | head -1)
+fi
 
 if [[ -z "$MOUNT_POINT" ]] || [[ ! -d "$MOUNT_POINT" ]]; then
     echo -e "${RED}Error: Could not find mount point${NC}"
     exit 1
 fi
-echo -e "${GREEN}*${NC} Mounted"
+
+# Verify app exists in mounted DMG
+if [[ ! -d "$MOUNT_POINT/$APP_NAME.app" ]]; then
+    echo -e "${RED}Error: App not found in disk image${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} Mounted"
 
 # Check if app already exists and remove old version
 if [[ -d "$INSTALL_DIR/$APP_NAME.app" ]]; then
-    echo -e "${YELLOW}*${NC} Upgrading from v$CURRENT_VERSION..."
+    echo -e "${BLUE}→${NC} Removing old version..."
     rm -rf "$INSTALL_DIR/$APP_NAME.app"
 fi
 
 # Copy app to Applications
-echo -e "${BLUE}*${NC} Installing to $INSTALL_DIR..."
+echo -e "${BLUE}→${NC} Installing to $INSTALL_DIR..."
 if ! cp -R "$MOUNT_POINT/$APP_NAME.app" "$INSTALL_DIR/"; then
     echo -e "${RED}Error: Failed to copy app to Applications${NC}"
-    echo -e "${YELLOW}Try running with sudo: sudo bash <(curl -fsSL ...)${NC}"
+    echo -e "${YELLOW}Try running with sudo:${NC}"
+    echo -e "${BOLD}  sudo bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install.sh)\"${NC}"
     exit 1
 fi
 
@@ -167,33 +201,33 @@ if [[ ! -d "$INSTALL_DIR/$APP_NAME.app" ]]; then
 fi
 
 # Remove quarantine attribute (bypass Gatekeeper for unsigned app)
-echo -e "${BLUE}*${NC} Configuring security settings..."
+echo -e "${BLUE}→${NC} Configuring security..."
 xattr -cr "$INSTALL_DIR/$APP_NAME.app" 2>/dev/null || true
-echo -e "${GREEN}*${NC} Security configured"
+echo -e "${GREEN}✓${NC} Security configured"
 
-# Unmount DMG
-echo -e "${BLUE}*${NC} Cleaning up..."
+# Unmount DMG (cleanup will also try this)
 hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
+MOUNT_POINT=""
 
 # Success message
 echo ""
-echo -e "${GREEN}${BOLD}================================================${NC}"
+echo -e "${GREEN}${BOLD}════════════════════════════════════════════════${NC}"
 if [[ -n "$CURRENT_VERSION" ]]; then
     echo -e "${GREEN}${BOLD}   LyricGlow upgraded: v$CURRENT_VERSION → v$VERSION${NC}"
 else
     echo -e "${GREEN}${BOLD}   LyricGlow v$VERSION installed successfully!${NC}"
 fi
-echo -e "${GREEN}${BOLD}================================================${NC}"
+echo -e "${GREEN}${BOLD}════════════════════════════════════════════════${NC}"
 echo ""
-echo -e "Location: ${BOLD}$INSTALL_DIR/$APP_NAME.app${NC}"
-echo -e "Settings: ${BOLD}Preserved${NC} (stored separately)"
+echo -e "  Location: ${BOLD}$INSTALL_DIR/$APP_NAME.app${NC}"
+echo -e "  Settings: ${BOLD}Preserved${NC} (stored in ~/Library)"
 echo ""
 
-# Launch the app automatically (non-interactive install)
-echo -e "${BLUE}*${NC} Launching LyricGlow..."
+# Launch the app
+echo -e "${BLUE}→${NC} Launching LyricGlow..."
 open "$INSTALL_DIR/$APP_NAME.app"
 
 echo ""
-echo -e "Enjoy your music with synchronized lyrics!"
-echo -e "To quit: Click the menu bar icon → Quit"
+echo -e "${GREEN}✓${NC} Enjoy your music with synchronized lyrics!"
+echo -e "  To quit: Click the menu bar icon → Quit"
 echo ""
