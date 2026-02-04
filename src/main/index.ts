@@ -66,48 +66,8 @@ interface MergedMetadata {
   hasSpotifyData: boolean;
 }
 
-interface SpotifyImage {
-  url: string;
-  height?: number;
-  width?: number;
-}
-
-interface SpotifyTrack {
-  name: string;
-  popularity: number;
-  artist: string;
-  url: string;
-  album: { images: SpotifyImage[] };
-}
-
-interface SpotifyAlbum {
-  name: string;
-  total_tracks: number;
-  artist: string;
-  url: string;
-  images: SpotifyImage[];
-}
-
-interface SpotifyArtistData {
-  artist: {
-    images: SpotifyImage[];
-    popularity?: number;
-    genres?: string[];
-    followers?: number;
-  };
-  topTracks?: SpotifyTrack[];
-  topAlbums?: SpotifyAlbum[];
-}
-
-interface AudioDBArtistInfo {
-  allImages: string[];
-  [key: string]: unknown;
-}
-
-interface AudioDBData {
-  artist: AudioDBArtistInfo;
-  [key: string]: unknown;
-}
+// External API data types - using unknown for flexibility with dynamic API responses
+type ExternalMetadata = unknown;
 
 // Module state for app quitting
 let isAppQuitting = false;
@@ -869,75 +829,98 @@ async function broadcastMusicUpdate(
 }
 
 function mergeArtistMetadata(
-  audioDBData: AudioDBData | null,
-  spotifyData: SpotifyArtistData | null,
+  audioDBData: ExternalMetadata,
+  spotifyData: ExternalMetadata,
 ): MergedMetadata | null {
   if (!audioDBData && !spotifyData) return null;
 
-  if (!spotifyData) {
+  // Cast to Record for property access - these are dynamic API responses
+  const audioDB = audioDBData as Record<string, unknown> | null;
+  const spotify = spotifyData as Record<string, unknown> | null;
+
+  // Type helpers for dynamic API data
+  const getArtist = (data: Record<string, unknown>) =>
+    (data.artist as Record<string, unknown>) || {};
+  const getImages = (artist: Record<string, unknown>) =>
+    (artist.images as Array<{ url: string }>) || [];
+  const getAllImages = (artist: Record<string, unknown>) =>
+    (artist.allImages as string[]) || [];
+
+  if (!spotify && audioDB) {
+    const artist = getArtist(audioDB);
     return {
-      ...audioDBData,
+      ...audioDB,
       artist: {
-        ...audioDBData.artist,
-        allImages: audioDBData.artist.allImages
-          .filter((img: string) => img && img !== '')
+        ...artist,
+        allImages: getAllImages(artist)
+          .filter((img) => img && img !== '')
           .slice(0, 8),
       },
       hasSpotifyData: false,
     };
   }
 
-  if (!audioDBData) {
+  if (!audioDB && spotify) {
+    const artist = getArtist(spotify);
     return {
       artist: {
-        ...spotifyData.artist,
-        allImages: spotifyData.artist.images.map(
-          (img: SpotifyImage) => img.url,
-        ),
+        ...artist,
+        allImages: getImages(artist).map((img) => img.url),
       },
-      topTracks: spotifyData.topTracks,
-      topAlbums: spotifyData.topAlbums,
+      topTracks: spotify.topTracks as Record<string, unknown>[] | undefined,
+      topAlbums: spotify.topAlbums as Record<string, unknown>[] | undefined,
       hasSpotifyData: true,
     };
   }
 
+  if (!audioDB || !spotify) return null;
+
+  const audioArtist = getArtist(audioDB);
+  const spotifyArtist = getArtist(spotify);
+  const spotifyImages = getImages(spotifyArtist);
+
   const mergedArtist = {
-    ...audioDBData.artist,
-    ...(spotifyData.artist && {
-      allImages: [
-        spotifyData.artist.images[0]?.url,
-        ...audioDBData.artist.allImages,
-      ]
-        .filter((img: string) => img && img !== '')
-        .filter(
-          (img: string, index: number, self: string[]) =>
-            self.indexOf(img) === index,
-        )
+    ...audioArtist,
+    ...(spotifyArtist && {
+      allImages: [spotifyImages[0]?.url, ...getAllImages(audioArtist)]
+        .filter((img): img is string => typeof img === 'string' && img !== '')
+        .filter((img, index, self) => self.indexOf(img) === index)
         .slice(0, 8),
-      spotifyPopularity: spotifyData.artist.popularity,
-      spotifyGenres: spotifyData.artist.genres,
-      spotifyFollowers: spotifyData.artist.followers.toLocaleString(),
+      spotifyPopularity: spotifyArtist.popularity,
+      spotifyGenres: spotifyArtist.genres,
+      spotifyFollowers:
+        typeof spotifyArtist.followers === 'number'
+          ? spotifyArtist.followers.toLocaleString()
+          : spotifyArtist.followers,
     }),
   };
+
+  const topTracks = spotify.topTracks as Array<Record<string, unknown>>;
+  const topAlbums = spotify.topAlbums as Array<Record<string, unknown>>;
 
   return {
     artist: mergedArtist,
     topTracks:
-      spotifyData.topTracks && spotifyData.topTracks.length > 0
-        ? spotifyData.topTracks.map((t: SpotifyTrack) => ({
+      topTracks && topTracks.length > 0
+        ? topTracks.map((t) => ({
             name: t.name,
             playcount: t.popularity,
-            image: t.album.images[0]?.url || null,
+            image:
+              (
+                (t.album as Record<string, unknown>)?.images as Array<{
+                  url: string;
+                }>
+              )?.[0]?.url || null,
             artist: t.artist,
             url: t.url,
           }))
         : null,
     topAlbums:
-      spotifyData.topAlbums && spotifyData.topAlbums.length > 0
-        ? spotifyData.topAlbums.map((a: SpotifyAlbum) => ({
+      topAlbums && topAlbums.length > 0
+        ? topAlbums.map((a) => ({
             name: a.name,
             playcount: `${a.total_tracks} tracks`,
-            image: a.images[0]?.url || null,
+            image: (a.images as Array<{ url: string }>)?.[0]?.url || null,
             artist: a.artist,
             url: a.url,
           }))

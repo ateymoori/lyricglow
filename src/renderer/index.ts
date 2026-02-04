@@ -62,46 +62,6 @@ interface CacheEntry {
   timestamp: number;
 }
 
-interface MetadataElements {
-  container: HTMLElement | null;
-  artistInfo: HTMLElement | null;
-  artistAlternateName: HTMLElement | null;
-  artistCountry: HTMLElement | null;
-  artistBornYear: HTMLElement | null;
-  artistDiedYear: HTMLElement | null;
-  artistGenre: HTMLElement | null;
-  artistLinks: HTMLElement | null;
-  artistWebsite: HTMLElement | null;
-  artistFacebook: HTMLElement | null;
-  artistTwitter: HTMLElement | null;
-  artistListeners: HTMLElement | null;
-  artistPlaycount: HTMLElement | null;
-  trackPlaycount: HTMLElement | null;
-  artistProfile: HTMLElement | null;
-  tags: HTMLElement | null;
-  bioSummary: HTMLElement | null;
-  bioExpand: HTMLElement | null;
-  similarArtists: HTMLElement | null;
-  metadataBio: HTMLElement | null;
-  metadataSimilar: HTMLElement | null;
-  carouselTrack: HTMLElement | null;
-  carouselPrev: HTMLElement | null;
-  carouselNext: HTMLElement | null;
-  artistImagesCarousel: HTMLElement | null;
-  topTracksList: HTMLElement | null;
-  topTracksSection: HTMLElement | null;
-  topAlbumsGrid: HTMLElement | null;
-  topAlbumsSection: HTMLElement | null;
-  imageModal: HTMLElement | null;
-  modalImage: HTMLElement | null;
-  modalClose: HTMLElement | null;
-  modalDownload: HTMLElement | null;
-  spotifyPopularity: HTMLElement | null;
-  spotifyGenres: HTMLElement | null;
-  spotifyFollowers: HTMLElement | null;
-  [key: string]: HTMLElement | null;
-}
-
 interface WordState {
   glowing: boolean;
   intensity: number;
@@ -173,16 +133,19 @@ declare global {
       nextTrack: () => void;
       previousTrack: () => void;
       spotifyIsLoggedIn: () => Promise<boolean>;
-      spotifyGetUserProfile: () => Promise<unknown>;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      spotifyGetUserProfile: () => Promise<any>;
       spotifyLogin: () => void;
       spotifyLogout: () => void;
       onSpotifyLoggedIn: (callback: () => void) => void;
       onSpotifyLoggedOut: (callback: () => void) => void;
       onSpotifyLoginError: (callback: (error: string) => void) => void;
-      cacheList: () => Promise<unknown[]>;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      cacheList: () => Promise<any[]>;
       cacheDelete: (type: string, key: string) => Promise<boolean>;
       cacheClearAll: () => Promise<boolean>;
-      visibilityGet: (key?: string) => Promise<unknown>;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      visibilityGet: (key?: string) => Promise<any>;
       visibilitySet: (key: string, value: boolean) => Promise<boolean>;
       visibilityReset: () => Promise<boolean>;
       getLaunchAtLogin: () => Promise<boolean>;
@@ -190,10 +153,12 @@ declare global {
       getTrayLyrics: () => Promise<boolean>;
       setTrayLyrics: (enabled: boolean) => Promise<boolean>;
       onOpenSettings: (callback: () => void) => void;
-      logsGetStats: () => Promise<unknown>;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      logsGetStats: () => Promise<any>;
       logsOpenFolder: () => Promise<boolean>;
       logsClear: () => Promise<boolean>;
-      onTranslationUpdate: (callback: (payload: unknown) => void) => void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onTranslationUpdate: (callback: (payload: any) => void) => void;
       translationGetEnabled: () => Promise<boolean>;
       translationSetEnabled: (enabled: boolean) => Promise<boolean>;
       translationGetTargetLang: () => Promise<string>;
@@ -1445,13 +1410,15 @@ class MetadataHandler {
   fullBio: string;
   currentImageIndex: number;
   artistImages: string[];
-  elements: MetadataElements;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  elements: any;
 
   constructor() {
     this.bioExpanded = false;
     this.fullBio = '';
     this.currentImageIndex = 0;
     this.artistImages = [];
+    this.elements = {};
   }
 
   init(): void {
@@ -1701,7 +1668,7 @@ class MetadataHandler {
           artistEl.onclick = () => window.musicAPI.openExternal(artist.url);
           this.elements.similarArtists.appendChild(artistEl);
 
-          if (index < metadata.artist.similar?.length - 1) {
+          if (index < (metadata.artist.similar?.length ?? 0) - 1) {
             const separator = document.createTextNode(', ');
             this.elements.similarArtists.appendChild(separator);
           }

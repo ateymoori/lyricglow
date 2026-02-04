@@ -155,12 +155,11 @@ class TheAudioDBManager {
     const response = await this.makeRequest(`search.php?s=${encodedArtist}`);
     const duration = Date.now() - startTime;
 
-    if (
-      response &&
-      (response as AudioDBSearchResponse).artists &&
-      (response as AudioDBSearchResponse).artists?.length > 0
-    ) {
-      const artist = (response as AudioDBSearchResponse).artists?.[0];
+    const searchResponse = response as AudioDBSearchResponse | null;
+    const artists = searchResponse?.artists;
+
+    if (artists && artists.length > 0) {
+      const artist = artists[0];
       if (artist) {
         const parsedData = this.parseArtistData(artist);
 

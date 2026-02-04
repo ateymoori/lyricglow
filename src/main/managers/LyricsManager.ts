@@ -43,7 +43,10 @@ class LyricsManager {
     const startTime = Date.now();
 
     // Check cache first
-    const cached = await this.cache.get('lyrics', cacheKey);
+    const cached = (await this.cache.get(
+      'lyrics',
+      cacheKey,
+    )) as LyricsData | null;
     if (cached) {
       Logger.lyrics.debug(`Cache hit: ${title} - ${artist}`);
       return cached;
@@ -67,7 +70,10 @@ class LyricsManager {
     Logger.lyrics.warn(`Not found (${duration}ms): ${title} - ${artist}`);
 
     // Offline fallback
-    const offlineCache = await this.cache.get('lyrics', cacheKey);
+    const offlineCache = (await this.cache.get(
+      'lyrics',
+      cacheKey,
+    )) as LyricsData | null;
     return offlineCache;
   }
 

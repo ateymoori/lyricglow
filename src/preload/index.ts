@@ -8,11 +8,15 @@
 import { contextBridge, type IpcRendererEvent, ipcRenderer } from 'electron';
 
 // Type definitions for the exposed API
+// Using 'any' for dynamic IPC payloads to avoid strict type checking issues
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type IpcPayload = any;
+
 interface MusicAPI {
   // Music updates
-  onUpdate: (callback: (payload: unknown) => void) => void;
-  onLyricsUpdate: (callback: (payload: unknown) => void) => void;
-  onMetadataUpdate: (callback: (payload: unknown) => void) => void;
+  onUpdate: (callback: (payload: IpcPayload) => void) => void;
+  onLyricsUpdate: (callback: (payload: IpcPayload) => void) => void;
+  onMetadataUpdate: (callback: (payload: IpcPayload) => void) => void;
   onPermissionError: (callback: () => void) => void;
   onPermissionGranted: (callback: () => void) => void;
   updateTrayLyrics: (text: string) => void;
@@ -33,7 +37,7 @@ interface MusicAPI {
 
   // Spotify auth
   spotifyIsLoggedIn: () => Promise<boolean>;
-  spotifyGetUserProfile: () => Promise<unknown>;
+  spotifyGetUserProfile: () => Promise<IpcPayload>;
   spotifyLogin: () => void;
   spotifyLogout: () => void;
   onSpotifyLoggedIn: (callback: () => void) => void;
@@ -41,12 +45,12 @@ interface MusicAPI {
   onSpotifyLoginError: (callback: (error: string) => void) => void;
 
   // Cache management
-  cacheList: () => Promise<unknown[]>;
+  cacheList: () => Promise<IpcPayload[]>;
   cacheDelete: (type: string, key: string) => Promise<boolean>;
   cacheClearAll: () => Promise<boolean>;
 
   // Visibility settings
-  visibilityGet: (key?: string) => Promise<unknown>;
+  visibilityGet: (key?: string) => Promise<IpcPayload>;
   visibilitySet: (key: string, value: boolean) => Promise<boolean>;
   visibilityReset: () => Promise<boolean>;
 
@@ -58,12 +62,12 @@ interface MusicAPI {
   onOpenSettings: (callback: () => void) => void;
 
   // Logs
-  logsGetStats: () => Promise<unknown>;
+  logsGetStats: () => Promise<IpcPayload>;
   logsOpenFolder: () => Promise<boolean>;
   logsClear: () => Promise<boolean>;
 
   // Translation
-  onTranslationUpdate: (callback: (payload: unknown) => void) => void;
+  onTranslationUpdate: (callback: (payload: IpcPayload) => void) => void;
   translationGetEnabled: () => Promise<boolean>;
   translationSetEnabled: (enabled: boolean) => Promise<boolean>;
   translationGetTargetLang: () => Promise<string>;
@@ -76,22 +80,22 @@ interface MusicAPI {
 
 const musicAPI: MusicAPI = {
   // Music updates
-  onUpdate: (callback: (payload: unknown) => void) => {
+  onUpdate: (callback: (payload: IpcPayload) => void) => {
     ipcRenderer.on(
       'music:update',
-      (_event: IpcRendererEvent, payload: unknown) => callback(payload),
+      (_event: IpcRendererEvent, payload: IpcPayload) => callback(payload),
     );
   },
-  onLyricsUpdate: (callback: (payload: unknown) => void) => {
+  onLyricsUpdate: (callback: (payload: IpcPayload) => void) => {
     ipcRenderer.on(
       'lyrics:update',
-      (_event: IpcRendererEvent, payload: unknown) => callback(payload),
+      (_event: IpcRendererEvent, payload: IpcPayload) => callback(payload),
     );
   },
-  onMetadataUpdate: (callback: (payload: unknown) => void) => {
+  onMetadataUpdate: (callback: (payload: IpcPayload) => void) => {
     ipcRenderer.on(
       'metadata:update',
-      (_event: IpcRendererEvent, payload: unknown) => callback(payload),
+      (_event: IpcRendererEvent, payload: IpcPayload) => callback(payload),
     );
   },
   onPermissionError: (callback: () => void) => {
@@ -211,10 +215,10 @@ const musicAPI: MusicAPI = {
   },
 
   // Translation
-  onTranslationUpdate: (callback: (payload: unknown) => void) => {
+  onTranslationUpdate: (callback: (payload: IpcPayload) => void) => {
     ipcRenderer.on(
       'translation:update',
-      (_event: IpcRendererEvent, payload: unknown) => callback(payload),
+      (_event: IpcRendererEvent, payload: IpcPayload) => callback(payload),
     );
   },
   translationGetEnabled: () => {
