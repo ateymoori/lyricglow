@@ -1074,10 +1074,8 @@ function createWindow(): void {
   mainWindow.on('close', (event) => {
     if (!isAppQuitting) {
       event.preventDefault();
-      // Act like user unchecked "Show Window" in tray menu
-      saveWindowEnabledSetting(false);
-      updateTrayMenu();
-      Logger.app.debug('Window closed by user (Show Window disabled)');
+      hideWindow();
+      Logger.app.debug('Window hidden via close button');
     }
   });
 
