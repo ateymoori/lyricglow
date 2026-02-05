@@ -1048,6 +1048,9 @@ function createWindow(): void {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
+    // Native macOS Liquid Glass vibrancy
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: true,
