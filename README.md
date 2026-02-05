@@ -103,9 +103,9 @@ curl -fsSL https://raw.githubusercontent.com/ateymoori/lyricglow/main/scripts/in
 <td>
 
 **Design**
-- Glassmorphism UI
+- Apple Liquid Glass UI
+- Dark/light mode auto-switch
 - RTL support (Arabic, Persian, Hebrew)
-- Customizable sections
 - Always-on-top floating window
 
 </td>
