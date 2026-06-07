@@ -128,6 +128,13 @@ let settingsStore: Store | null = null;
 // Tray lyrics setting
 let trayLyricsEnabled = true; // Show lyrics in system tray (default: enabled)
 
+// Overlay mode
+let overlayWindow: BrowserWindow | null = null;
+let overlayEnabled = false;
+let overlayDragging = false;
+let overlayDragStartPos = { x: 0, y: 0 };
+let overlayWinStartPos = { x: 0, y: 0 };
+
 // Translation settings
 let translationEnabled = false; // Enable lyrics translation (default: disabled)
 let translationTargetLang = 'en'; // Target language code (default: English)
@@ -171,6 +178,7 @@ async function getSettingsStore(): Promise<Store> {
       'translationTargetLang',
       'en',
     ) as string;
+    overlayEnabled = settingsStore.get('overlayEnabled', false) as boolean;
   }
   return settingsStore;
 }
@@ -215,6 +223,78 @@ function saveTrayLyricsSetting(enabled: boolean): void {
   }
 
   Logger.app.info(`Tray lyrics ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+function createOverlayWindow(): void {
+  if (overlayWindow && !overlayWindow.isDestroyed()) return;
+
+  const savedPos = settingsStore?.get('overlayPosition') as
+    | { x: number; y: number }
+    | undefined;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width } = primaryDisplay.workArea;
+  const defaultX = Math.round((width - 695) / 2);
+  const defaultY = 40;
+
+  overlayWindow = new BrowserWindow({
+    width: 695,
+    height: 125,
+    x: savedPos?.x ?? defaultX,
+    y: savedPos?.y ?? defaultY,
+    resizable: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    hasShadow: true,
+    show: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  overlayWindow.setAlwaysOnTop(true, 'floating');
+  overlayWindow.setVisibleOnAllWorkspaces(true);
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+
+  overlayWindow.loadFile(
+    path.join(__dirname, '../renderer/resources/overlay.html'),
+  );
+
+  overlayWindow.on('closed', () => {
+    overlayWindow = null;
+  });
+
+  Logger.app.info('Overlay window created');
+}
+
+function destroyOverlayWindow(): void {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.destroy();
+    overlayWindow = null;
+  }
+}
+
+function saveOverlayEnabledSetting(enabled: boolean): void {
+  overlayEnabled = enabled;
+  if (settingsStore) {
+    settingsStore.set('overlayEnabled', enabled);
+  }
+
+  if (enabled) {
+    createOverlayWindow();
+    hideWindow();
+  } else {
+    destroyOverlayWindow();
+    if (windowEnabled) showWindow();
+  }
+
+  updateTrayMenu();
+  Logger.app.info(`Overlay mode ${enabled ? 'enabled' : 'disabled'}`);
 }
 
 // Window visibility control
@@ -1139,6 +1219,11 @@ app.whenReady().then(async () => {
   createTray();
   createWindow();
 
+  if (overlayEnabled) {
+    createOverlayWindow();
+    hideWindow();
+  }
+
   unifiedCache.clearExpired().catch((err) => {
     Logger.cache.error('Background cache cleanup failed', err as Error);
   });
@@ -1175,6 +1260,46 @@ ipcMain.on('window:close', () => {
   Logger.app.debug(
     'Window closed by user via close button (Show Window disabled)',
   );
+});
+
+// Overlay drag IPC handlers
+ipcMain.on(
+  'overlay:drag-start',
+  (_event, pos: { x: number; y: number }) => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    overlayDragging = true;
+    overlayDragStartPos = pos;
+    const pos2 = overlayWindow.getPosition();
+    overlayWinStartPos = { x: pos2[0] ?? 0, y: pos2[1] ?? 0 };
+  },
+);
+
+ipcMain.on(
+  'overlay:drag-move',
+  (_event, pos: { x: number; y: number }) => {
+    if (!overlayDragging || !overlayWindow || overlayWindow.isDestroyed()) return;
+    const dx = pos.x - overlayDragStartPos.x;
+    const dy = pos.y - overlayDragStartPos.y;
+    overlayWindow.setPosition(
+      overlayWinStartPos.x + dx,
+      overlayWinStartPos.y + dy,
+    );
+  },
+);
+
+ipcMain.on('overlay:drag-stop', () => {
+  overlayDragging = false;
+  if (overlayWindow && !overlayWindow.isDestroyed() && settingsStore) {
+    const overlayPos = overlayWindow.getPosition();
+    settingsStore.set('overlayPosition', { x: overlayPos[0] ?? 0, y: overlayPos[1] ?? 0 });
+  }
+});
+
+ipcMain.handle('overlay:get-enabled', () => overlayEnabled);
+
+ipcMain.handle('overlay:set-enabled', (_event, enabled: boolean) => {
+  saveOverlayEnabledSetting(enabled);
+  return true;
 });
 
 function executeMediaControl(
