@@ -248,7 +248,7 @@ function createOverlayWindow(): void {
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: false,
-    hasShadow: true,
+    hasShadow: false,
     show: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -267,6 +267,13 @@ function createOverlayWindow(): void {
 
   overlayWindow.on('closed', () => {
     overlayWindow = null;
+    overlayDragging = false;
+    if (overlayEnabled) {
+      overlayEnabled = false;
+      if (settingsStore) settingsStore.set('overlayEnabled', false);
+      updateTrayMenu();
+      handleWindowVisibility(lastTrackData?.isPlaying ?? false);
+    }
   });
 
   Logger.app.info('Overlay window created');
@@ -277,6 +284,9 @@ function destroyOverlayWindow(): void {
     overlayWindow.destroy();
     overlayWindow = null;
   }
+  overlayDragging = false;
+  overlayDragStartPos = { x: 0, y: 0 };
+  overlayWinStartPos = { x: 0, y: 0 };
 }
 
 function saveOverlayEnabledSetting(enabled: boolean): void {
@@ -290,7 +300,7 @@ function saveOverlayEnabledSetting(enabled: boolean): void {
     hideWindow();
   } else {
     destroyOverlayWindow();
-    if (windowEnabled) showWindow();
+    handleWindowVisibility(lastTrackData?.isPlaying ?? false);
   }
 
   updateTrayMenu();
@@ -329,6 +339,7 @@ function handleTrayClick(): void {
 }
 
 function handleWindowVisibility(isPlaying: boolean): void {
+  if (overlayEnabled) return;
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
   // If window is disabled by user, always keep it hidden
