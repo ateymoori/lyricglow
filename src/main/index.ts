@@ -923,6 +923,7 @@ async function broadcastMusicUpdate(
       if (overlayWindow && !overlayWindow.isDestroyed()) {
         overlayWindow.webContents.send('music:update', null);
         overlayWindow.webContents.send('lyrics:update', null);
+        overlayWindow.webContents.send('metadata:update', null);
       }
       handleWindowVisibility(false);
     }
