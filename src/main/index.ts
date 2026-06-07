@@ -1058,6 +1058,14 @@ function updateTrayMenu(): void {
         updateTrayMenu();
       },
     },
+    {
+      label: 'Overlay Mode',
+      type: 'checkbox',
+      checked: overlayEnabled,
+      click: () => {
+        saveOverlayEnabledSetting(!overlayEnabled);
+      },
+    },
     { type: 'separator' },
     {
       label: 'Settings',

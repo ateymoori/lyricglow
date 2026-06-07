@@ -152,6 +152,8 @@ declare global {
       setLaunchAtLogin: (enabled: boolean) => Promise<boolean>;
       getTrayLyrics: () => Promise<boolean>;
       setTrayLyrics: (enabled: boolean) => Promise<boolean>;
+      getOverlayEnabled: () => Promise<boolean>;
+      setOverlayEnabled: (enabled: boolean) => Promise<boolean>;
       onOpenSettings: (callback: () => void) => void;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       logsGetStats: () => Promise<any>;
@@ -2009,6 +2011,7 @@ class SettingsHandler {
     this.initLogsTab();
     this.initLaunchAtLogin();
     this.initTrayLyrics();
+    this.initOverlayMode();
     this.initTranslation();
 
     window.musicAPI.onOpenSettings(() => {
@@ -2246,6 +2249,27 @@ class SettingsHandler {
 
         checkbox.checked = !checkbox.checked;
         await window.musicAPI.setTrayLyrics(checkbox.checked);
+      });
+    }
+  }
+
+  async initOverlayMode(): Promise<void> {
+    const checkbox = document.getElementById(
+      'settings-overlay-enabled',
+    ) as HTMLInputElement;
+    if (!checkbox) return;
+
+    const enabled = await window.musicAPI.getOverlayEnabled();
+    checkbox.checked = enabled;
+
+    const label = checkbox.closest('.visibility-option');
+    if (label) {
+      label.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        checkbox.checked = !checkbox.checked;
+        await window.musicAPI.setOverlayEnabled(checkbox.checked);
       });
     }
   }
