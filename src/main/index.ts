@@ -833,6 +833,9 @@ async function broadcastMusicUpdate(
 ): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('music:update', trackData);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send('music:update', trackData);
+    }
 
     if (trackData?.title && trackData.artist) {
       const trackKey = `${trackData.title}-${trackData.artist}`;
@@ -862,6 +865,9 @@ async function broadcastMusicUpdate(
               currentTrackKey === trackKey
             ) {
               mainWindow.webContents.send('lyrics:update', lyricsData);
+              if (overlayWindow && !overlayWindow.isDestroyed() && currentTrackKey === trackKey) {
+                overlayWindow.webContents.send('lyrics:update', lyricsData);
+              }
 
               // Store synced lyrics for potential refresh when translation settings change
               currentSyncedLyrics = lyricsData?.synced || null;
@@ -914,6 +920,10 @@ async function broadcastMusicUpdate(
       if (tray) tray.setTitle('');
       mainWindow.webContents.send('lyrics:update', null);
       mainWindow.webContents.send('metadata:update', null);
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send('music:update', null);
+        overlayWindow.webContents.send('lyrics:update', null);
+      }
       handleWindowVisibility(false);
     }
   }
