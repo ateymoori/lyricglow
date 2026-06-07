@@ -145,6 +145,7 @@ let translationInProgress = false; // Prevent concurrent translation calls
 let currentLyrics: Array<{ time: number; text: string }> = [];
 let currentLyricIndex = 0;
 let lyricsSyncInterval: NodeJS.Timeout | null = null;
+let lyricFetchDebounce: NodeJS.Timeout | null = null;
 
 // Internal position tracking (for accurate tray sync)
 let internalPosition = 0;
@@ -855,37 +856,40 @@ async function broadcastMusicUpdate(
         // Fire all fetches in parallel but send results independently as they complete
         // This makes the app feel faster - each data type shows as soon as it's ready
 
-        // Lyrics fetch - send immediately when ready, don't wait for metadata
-        lyricsManager
-          .fetchLyrics(trackData.title, trackData.artist)
-          .then((lyricsData) => {
-            if (
-              mainWindow &&
-              !mainWindow.isDestroyed() &&
-              currentTrackKey === trackKey
-            ) {
-              mainWindow.webContents.send('lyrics:update', lyricsData);
-              if (overlayWindow && !overlayWindow.isDestroyed() && currentTrackKey === trackKey) {
-                overlayWindow.webContents.send('lyrics:update', lyricsData);
-              }
+        // Lyrics fetch — debounced 300ms so Spotify settles before querying
+        if (lyricFetchDebounce) clearTimeout(lyricFetchDebounce);
+        lyricFetchDebounce = setTimeout(() => {
+          lyricsManager
+            .fetchLyrics(trackData.title, trackData.artist)
+            .then((lyricsData) => {
+              if (
+                mainWindow &&
+                !mainWindow.isDestroyed() &&
+                currentTrackKey === trackKey
+              ) {
+                mainWindow.webContents.send('lyrics:update', lyricsData);
+                if (overlayWindow && !overlayWindow.isDestroyed() && currentTrackKey === trackKey) {
+                  overlayWindow.webContents.send('lyrics:update', lyricsData);
+                }
 
-              // Store synced lyrics for potential refresh when translation settings change
-              currentSyncedLyrics = lyricsData?.synced || null;
+                // Store synced lyrics for potential refresh when translation settings change
+                currentSyncedLyrics = lyricsData?.synced || null;
 
-              // Async translation - non-blocking
-              if (translationEnabled && lyricsData && lyricsData.synced) {
-                translateLyricsAsync(lyricsData.synced, trackKey);
-              }
+                // Async translation - non-blocking
+                if (translationEnabled && lyricsData && lyricsData.synced) {
+                  translateLyricsAsync(lyricsData.synced, trackKey);
+                }
 
-              // Main process manages tray lyrics sync
-              if (lyricsData?.synced) {
-                startLyricsSync(lyricsData);
-              } else {
-                stopLyricsSync();
-                if (tray) tray.setTitle('');
+                // Main process manages tray lyrics sync
+                if (lyricsData?.synced) {
+                  startLyricsSync(lyricsData);
+                } else {
+                  stopLyricsSync();
+                  if (tray) tray.setTitle('');
+                }
               }
-            }
-          });
+            });
+        }, 300);
 
         // Metadata fetches - run in parallel, merge and send when both complete
         const audioDBPromise = audioDBManager.fetchMetadata(trackData.artist);
