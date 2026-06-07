@@ -55,6 +55,8 @@ class LyricsManager {
     const memoryCached = this.memoryCache.get(cacheKey);
     if (memoryCached) {
       Logger.lyrics.debug(`Memory cache hit: ${title} - ${artist}`);
+      this.memoryCache.delete(cacheKey);
+      this.memoryCache.set(cacheKey, memoryCached);
       return memoryCached;
     }
 
@@ -86,7 +88,11 @@ class LyricsManager {
 
     Logger.lyrics.warn(`Not found (${duration}ms): ${title} - ${artist}`);
 
-    // Offline fallback
+    // Cache miss sentinel in memory so repeated plays in this session skip the API
+    const sentinel: LyricsData = { synced: null, plain: null, instrumental: false };
+    this.setMemoryCache(cacheKey, sentinel);
+
+    // Offline fallback (disk may have data from a previous session)
     const offlineCache = (await this.cache.get(
       'lyrics',
       cacheKey,

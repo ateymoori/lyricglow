@@ -1272,6 +1272,9 @@ ipcMain.on('app:quit', () => {
   if (pollInterval) {
     clearInterval(pollInterval);
   }
+  if (lyricFetchDebounce) {
+    clearTimeout(lyricFetchDebounce);
+  }
   isAppQuitting = true;
   app.quit();
 });
