@@ -76,6 +76,13 @@ interface MusicAPI {
     Array<{ code: string; name: string; rtl: boolean }>
   >;
   translationRefresh: () => Promise<boolean>;
+
+  // Overlay mode
+  overlayDragStart: (pos: { x: number; y: number }) => void;
+  overlayDragMove: (pos: { x: number; y: number }) => void;
+  overlayDragStop: () => void;
+  getOverlayEnabled: () => Promise<boolean>;
+  setOverlayEnabled: (enabled: boolean) => Promise<boolean>;
 }
 
 const musicAPI: MusicAPI = {
@@ -238,6 +245,23 @@ const musicAPI: MusicAPI = {
   },
   translationRefresh: () => {
     return ipcRenderer.invoke('translation:refresh');
+  },
+
+  // Overlay mode
+  overlayDragStart: (pos: { x: number; y: number }) => {
+    ipcRenderer.send('overlay:drag-start', pos);
+  },
+  overlayDragMove: (pos: { x: number; y: number }) => {
+    ipcRenderer.send('overlay:drag-move', pos);
+  },
+  overlayDragStop: () => {
+    ipcRenderer.send('overlay:drag-stop');
+  },
+  getOverlayEnabled: () => {
+    return ipcRenderer.invoke('overlay:get-enabled');
+  },
+  setOverlayEnabled: (enabled: boolean) => {
+    return ipcRenderer.invoke('overlay:set-enabled', enabled);
   },
 };
 
