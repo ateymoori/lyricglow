@@ -78,6 +78,7 @@ api.onLyricsUpdate((data: LyricsData | null) => {
   }
   if (data.synced) {
     syncedLyrics = parseLRC(data.synced);
+    lyricLine.textContent = getActiveLyric(position);
   } else {
     syncedLyrics = [];
     lyricLine.textContent = data.plain?.split('\n')[0] || '—';
@@ -108,6 +109,11 @@ document.addEventListener('mousedown', (e: MouseEvent) => {
 
 document.addEventListener('mousemove', (e: MouseEvent) => {
   if (isDragging) {
+    if (e.buttons === 0) {
+      isDragging = false;
+      api.overlayDragStop();
+      return;
+    }
     api.overlayDragMove({ x: e.screenX, y: e.screenY });
   }
 });
