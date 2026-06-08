@@ -134,6 +134,10 @@ let overlayEnabled = false;
 let overlayDragging = false;
 let overlayDragStartPos = { x: 0, y: 0 };
 let overlayWinStartPos = { x: 0, y: 0 };
+let overlayOpacity = 0.8; // default to 80% (0.8)
+let currentLyricsData: any = null; // Store raw lyrics data for overlay updates
+let trayEnabled = true; // Show menu bar (tray) icon (default: enabled)
+let overlayShowMetadata = true; // Show track details (title & artist) in overlay (default: enabled)
 
 // Translation settings
 let translationEnabled = false; // Enable lyrics translation (default: disabled)
@@ -180,6 +184,9 @@ async function getSettingsStore(): Promise<Store> {
       'en',
     ) as string;
     overlayEnabled = settingsStore.get('overlayEnabled', false) as boolean;
+    overlayOpacity = settingsStore.get('overlayOpacity', 0.8) as number;
+    trayEnabled = settingsStore.get('trayEnabled', true) as boolean;
+    overlayShowMetadata = settingsStore.get('overlayShowMetadata', true) as boolean;
   }
   return settingsStore;
 }
@@ -234,12 +241,14 @@ function createOverlayWindow(): void {
     | undefined;
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width } = primaryDisplay.workArea;
-  const defaultX = Math.round((width - 695) / 2);
+  const defaultX = Math.round((width - 360) / 2);
   const defaultY = 40;
 
+  const overlayHeight = overlayShowMetadata ? 60 : 44;
+
   overlayWindow = new BrowserWindow({
-    width: 695,
-    height: 125,
+    width: 360,
+    height: overlayHeight,
     x: savedPos?.x ?? defaultX,
     y: savedPos?.y ?? defaultY,
     resizable: false,
@@ -249,8 +258,10 @@ function createOverlayWindow(): void {
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: false,
-    hasShadow: false,
+    hasShadow: true,
     show: true,
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -868,6 +879,7 @@ async function broadcastMusicUpdate(
                 currentTrackKey === trackKey
               ) {
                 mainWindow.webContents.send('lyrics:update', lyricsData);
+                currentLyricsData = lyricsData;
                 if (overlayWindow && !overlayWindow.isDestroyed() && currentTrackKey === trackKey) {
                   overlayWindow.webContents.send('lyrics:update', lyricsData);
                 }
@@ -920,6 +932,7 @@ async function broadcastMusicUpdate(
       handleWindowVisibility(trackData.isPlaying);
     } else if (currentTrackKey) {
       currentTrackKey = null;
+      currentLyricsData = null;
       stopLyricsSync();
       if (tray) tray.setTitle('');
       mainWindow.webContents.send('lyrics:update', null);
@@ -1250,7 +1263,9 @@ app.whenReady().then(async () => {
     Logger.app.warn('Failed to register global hotkey');
   }
 
-  createTray();
+  if (trayEnabled) {
+    createTray();
+  }
   createWindow();
 
   if (overlayEnabled) {
@@ -1338,6 +1353,93 @@ ipcMain.handle('overlay:set-enabled', (_event, enabled: boolean) => {
   saveOverlayEnabledSetting(enabled);
   return true;
 });
+
+ipcMain.on('overlay:ready', () => {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    if (lastTrackData) {
+      overlayWindow.webContents.send('music:update', lastTrackData);
+    }
+    if (currentLyricsData) {
+      overlayWindow.webContents.send('lyrics:update', currentLyricsData);
+    }
+    overlayWindow.webContents.send('overlay:metadata-visibility-update', overlayShowMetadata);
+  }
+});
+
+ipcMain.on(
+  'overlay:set-ignore-mouse',
+  (_event, ignore: boolean, options?: { forward: boolean }) => {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.setIgnoreMouseEvents(ignore, options);
+    }
+  },
+);
+
+ipcMain.handle('overlay:get-opacity', () => overlayOpacity);
+
+ipcMain.handle('overlay:set-opacity', (_event, opacity: number) => {
+  overlayOpacity = opacity;
+  if (settingsStore) {
+    settingsStore.set('overlayOpacity', opacity);
+  }
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send('overlay:opacity-update', opacity);
+  }
+  return true;
+});
+
+ipcMain.on('overlay:open-settings', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const wasDisabled = !windowEnabled;
+    if (wasDisabled) {
+      windowEnabled = true;
+    }
+    showWindow(true);
+    mainWindow.webContents.send('open-settings');
+    if (wasDisabled) {
+      windowEnabled = false;
+    }
+  }
+});
+
+ipcMain.handle('settings:get-tray-icon-enabled', () => trayEnabled);
+
+ipcMain.handle('settings:set-tray-icon-enabled', (_event, enabled: boolean) => {
+  updateTrayVisibility(enabled);
+  return true;
+});
+
+ipcMain.handle('overlay:get-show-metadata', () => overlayShowMetadata);
+
+ipcMain.handle('overlay:set-show-metadata', (_event, enabled: boolean) => {
+  overlayShowMetadata = enabled;
+  if (settingsStore) {
+    settingsStore.set('overlayShowMetadata', enabled);
+  }
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.setSize(360, enabled ? 60 : 44);
+    overlayWindow.webContents.send('overlay:metadata-visibility-update', enabled);
+  }
+  return true;
+});
+
+function updateTrayVisibility(enabled: boolean): void {
+  trayEnabled = enabled;
+  if (settingsStore) {
+    settingsStore.set('trayEnabled', enabled);
+  }
+
+  if (enabled) {
+    if (!tray) {
+      createTray();
+    }
+  } else {
+    if (tray) {
+      tray.destroy();
+      tray = null;
+    }
+  }
+}
 
 function executeMediaControl(
   command: string,
