@@ -76,6 +76,24 @@ interface MusicAPI {
     Array<{ code: string; name: string; rtl: boolean }>
   >;
   translationRefresh: () => Promise<boolean>;
+
+  // Overlay mode
+  overlayDragStart: (pos: { x: number; y: number }) => void;
+  overlayDragMove: (pos: { x: number; y: number }) => void;
+  overlayDragStop: () => void;
+  getOverlayEnabled: () => Promise<boolean>;
+  setOverlayEnabled: (enabled: boolean) => Promise<boolean>;
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => void;
+  overlayReady: () => void;
+  getOverlayOpacity: () => Promise<number>;
+  setOverlayOpacity: (opacity: number) => Promise<boolean>;
+  onOverlayOpacityUpdate: (callback: (opacity: number) => void) => void;
+  openSettings: () => void;
+  getTrayIconEnabled: () => Promise<boolean>;
+  setTrayIconEnabled: (enabled: boolean) => Promise<boolean>;
+  getOverlayShowMetadata: () => Promise<boolean>;
+  setOverlayShowMetadata: (enabled: boolean) => Promise<boolean>;
+  onOverlayShowMetadataUpdate: (callback: (enabled: boolean) => void) => void;
 }
 
 const musicAPI: MusicAPI = {
@@ -238,6 +256,62 @@ const musicAPI: MusicAPI = {
   },
   translationRefresh: () => {
     return ipcRenderer.invoke('translation:refresh');
+  },
+
+  // Overlay mode
+  overlayDragStart: (pos: { x: number; y: number }) => {
+    ipcRenderer.send('overlay:drag-start', pos);
+  },
+  overlayDragMove: (pos: { x: number; y: number }) => {
+    ipcRenderer.send('overlay:drag-move', pos);
+  },
+  overlayDragStop: () => {
+    ipcRenderer.send('overlay:drag-stop');
+  },
+  getOverlayEnabled: () => {
+    return ipcRenderer.invoke('overlay:get-enabled');
+  },
+  setOverlayEnabled: (enabled: boolean) => {
+    return ipcRenderer.invoke('overlay:set-enabled', enabled);
+  },
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward: boolean }) => {
+    ipcRenderer.send('overlay:set-ignore-mouse', ignore, options);
+  },
+  overlayReady: () => {
+    ipcRenderer.send('overlay:ready');
+  },
+  getOverlayOpacity: () => {
+    return ipcRenderer.invoke('overlay:get-opacity');
+  },
+  setOverlayOpacity: (opacity: number) => {
+    return ipcRenderer.invoke('overlay:set-opacity', opacity);
+  },
+  onOverlayOpacityUpdate: (callback: (opacity: number) => void) => {
+    ipcRenderer.on(
+      'overlay:opacity-update',
+      (_event: IpcRendererEvent, opacity: number) => callback(opacity),
+    );
+  },
+  openSettings: () => {
+    ipcRenderer.send('overlay:open-settings');
+  },
+  getTrayIconEnabled: () => {
+    return ipcRenderer.invoke('settings:get-tray-icon-enabled');
+  },
+  setTrayIconEnabled: (enabled: boolean) => {
+    return ipcRenderer.invoke('settings:set-tray-icon-enabled', enabled);
+  },
+  getOverlayShowMetadata: () => {
+    return ipcRenderer.invoke('overlay:get-show-metadata');
+  },
+  setOverlayShowMetadata: (enabled: boolean) => {
+    return ipcRenderer.invoke('overlay:set-show-metadata', enabled);
+  },
+  onOverlayShowMetadataUpdate: (callback: (enabled: boolean) => void) => {
+    ipcRenderer.on(
+      'overlay:metadata-visibility-update',
+      (_event: IpcRendererEvent, enabled: boolean) => callback(enabled),
+    );
   },
 };
 

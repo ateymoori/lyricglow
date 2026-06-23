@@ -34,7 +34,8 @@ export default defineConfig({
       outDir: 'dist/renderer',
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'resources/index.html')
+          index: resolve(__dirname, 'resources/index.html'),
+          overlay: resolve(__dirname, 'resources/overlay.html')
         }
       }
     }

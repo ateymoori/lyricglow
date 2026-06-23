@@ -216,6 +216,14 @@
                   <span class="setting-description">Start automatically when you log in</span>
                 </div>
               </label>
+              <label class="setting-row">
+                <input type="checkbox" id="settings-tray-icon-enabled" checked>
+                <span class="checkbox-custom"></span>
+                <div class="setting-content">
+                  <span class="setting-label">Show Menu Bar Icon</span>
+                  <span class="setting-description">Show the app icon in the macOS menu bar</span>
+                </div>
+              </label>
             </div>
           </div>
 
@@ -230,6 +238,32 @@
                   <span class="setting-description">Display current lyric line next to the app icon</span>
                 </div>
               </label>
+              <label class="setting-row visibility-option">
+                <input type="checkbox" id="settings-overlay-enabled">
+                <span class="checkbox-custom"></span>
+                <div class="setting-content">
+                  <span class="setting-label">Overlay Mode</span>
+                  <span class="setting-description">Show a slim transparent strip instead of the main window</span>
+                </div>
+              </label>
+              <!-- Overlay Opacity Slider -->
+              <div class="setting-row overlay-opacity-row" id="overlay-opacity-container" style="display: none; padding-left: 28px; border-top: none; margin-top: -5px; margin-bottom: 10px;">
+                <div class="setting-content" style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; max-width: 250px;">
+                    <span class="setting-label" style="font-size: var(--text-xs); color: var(--color-text-secondary);">Overlay Opacity</span>
+                    <span class="setting-value" id="overlay-opacity-value" style="font-size: var(--text-xs); font-weight: var(--font-semibold); color: var(--color-accent);">80%</span>
+                  </div>
+                  <input type="range" id="settings-overlay-opacity" min="10" max="100" step="5" value="80" style="width: 100%; max-width: 250px; cursor: pointer; accent-color: var(--color-accent);">
+                </div>
+              </div>
+              <!-- Overlay Show Metadata Option -->
+              <div class="setting-row overlay-metadata-row" id="overlay-metadata-container" style="display: none; padding-left: 28px; border-top: none; margin-top: -5px; margin-bottom: 10px; cursor: pointer;">
+                <input type="checkbox" id="settings-overlay-show-metadata" checked>
+                <span class="checkbox-custom"></span>
+                <div class="setting-content">
+                  <span class="setting-label">Show track details (title & artist)</span>
+                </div>
+              </div>
             </div>
           </div>
 

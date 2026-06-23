@@ -1,0 +1,145 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 360px;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#overlay {
+  width: 360px;
+  height: 100%;
+  /* background opacity adjustable, styled with premium dark glass theme */
+  background: rgba(30, 30, 30, calc(var(--overlay-bg-opacity, 0.8) * 0.45));
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  /* Subtly reflect light on the top edge of the panel (inset shadow) */
+  box-shadow: 
+    inset 0 1px 1px rgba(255, 255, 255, 0.15),
+    0 8px 32px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 16px 10px;
+  gap: 2px;
+  cursor: default;
+  position: relative; /* for absolute positioning of settings button */
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Hover state: highlight border slightly when interactive */
+#overlay:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.25),
+    0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* Settings button: subtle circle gear that fades in on hover, aligned top-right */
+#settings-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  left: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease, background 0.2s ease, color 0.2s ease;
+  outline: none;
+  z-index: 10;
+}
+
+#overlay:hover #settings-btn {
+  opacity: 1;
+}
+
+#settings-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+#meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 16px;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+#artwork {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+#artwork.visible {
+  opacity: 1;
+}
+
+#track-info {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#lyric-line {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  letter-spacing: -0.015em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  padding-left: 20px;
+  padding-right: 20px; /* offset to ensure text doesn't overlap setting button */
+}
+
+/* Styles when metadata row is hidden */
+#overlay.no-metadata {
+  padding: 8px 16px;
+}
+
+#overlay.no-metadata #meta-row {
+  display: none;
+}
+
+#overlay.no-metadata #settings-btn {
+  top: 13px; /* Center the gear vertically in the smaller 44px container */
+}

@@ -152,6 +152,17 @@ declare global {
       setLaunchAtLogin: (enabled: boolean) => Promise<boolean>;
       getTrayLyrics: () => Promise<boolean>;
       setTrayLyrics: (enabled: boolean) => Promise<boolean>;
+      getOverlayEnabled: () => Promise<boolean>;
+      setOverlayEnabled: (enabled: boolean) => Promise<boolean>;
+      getOverlayOpacity: () => Promise<number>;
+      setOverlayOpacity: (opacity: number) => Promise<boolean>;
+      onOverlayOpacityUpdate: (callback: (opacity: number) => void) => void;
+      openSettings: () => void;
+      getTrayIconEnabled: () => Promise<boolean>;
+      setTrayIconEnabled: (enabled: boolean) => Promise<boolean>;
+      getOverlayShowMetadata: () => Promise<boolean>;
+      setOverlayShowMetadata: (enabled: boolean) => Promise<boolean>;
+      onOverlayShowMetadataUpdate: (callback: (enabled: boolean) => void) => void;
       onOpenSettings: (callback: () => void) => void;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       logsGetStats: () => Promise<any>;
@@ -2009,7 +2020,9 @@ class SettingsHandler {
     this.initLogsTab();
     this.initLaunchAtLogin();
     this.initTrayLyrics();
+    this.initOverlayMode();
     this.initTranslation();
+    this.initTrayIconVisibility();
 
     window.musicAPI.onOpenSettings(() => {
       this.show();
@@ -2229,6 +2242,49 @@ class SettingsHandler {
     }
   }
 
+  async syncSettingsCheckboxes(): Promise<void> {
+    const trayCheckbox = document.getElementById('settings-tray-icon-enabled') as HTMLInputElement;
+    const overlayCheckbox = document.getElementById('settings-overlay-enabled') as HTMLInputElement;
+    const opacityContainer = document.getElementById('overlay-opacity-container') as HTMLElement;
+    const metadataContainer = document.getElementById('overlay-metadata-container') as HTMLElement;
+
+    if (trayCheckbox) {
+      trayCheckbox.checked = await window.musicAPI.getTrayIconEnabled();
+    }
+    if (overlayCheckbox) {
+      const overlayEnabled = await window.musicAPI.getOverlayEnabled();
+      overlayCheckbox.checked = overlayEnabled;
+      if (opacityContainer) {
+        opacityContainer.style.display = overlayEnabled ? 'flex' : 'none';
+      }
+      if (metadataContainer) {
+        metadataContainer.style.display = overlayEnabled ? 'flex' : 'none';
+      }
+    }
+  }
+
+  async initTrayIconVisibility(): Promise<void> {
+    const checkbox = document.getElementById(
+      'settings-tray-icon-enabled',
+    ) as HTMLInputElement;
+    if (!checkbox) return;
+
+    const enabled = await window.musicAPI.getTrayIconEnabled();
+    checkbox.checked = enabled;
+
+    const label = checkbox.closest('.setting-row');
+    if (label) {
+      label.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        checkbox.checked = !checkbox.checked;
+        await window.musicAPI.setTrayIconEnabled(checkbox.checked);
+        await this.syncSettingsCheckboxes();
+      });
+    }
+  }
+
   async initTrayLyrics(): Promise<void> {
     const checkbox = document.getElementById(
       'settings-tray-lyrics',
@@ -2247,6 +2303,78 @@ class SettingsHandler {
         checkbox.checked = !checkbox.checked;
         await window.musicAPI.setTrayLyrics(checkbox.checked);
       });
+    }
+  }
+
+  async initOverlayMode(): Promise<void> {
+    const checkbox = document.getElementById(
+      'settings-overlay-enabled',
+    ) as HTMLInputElement;
+    const opacitySlider = document.getElementById(
+      'settings-overlay-opacity',
+    ) as HTMLInputElement;
+    const opacityValue = document.getElementById(
+      'overlay-opacity-value',
+    ) as HTMLElement;
+    const opacityContainer = document.getElementById(
+      'overlay-opacity-container',
+    ) as HTMLElement;
+    const metadataCheckbox = document.getElementById(
+      'settings-overlay-show-metadata',
+    ) as HTMLInputElement;
+    const metadataContainer = document.getElementById(
+      'overlay-metadata-container',
+    ) as HTMLElement;
+
+    if (!checkbox) return;
+
+    const enabled = await window.musicAPI.getOverlayEnabled();
+    checkbox.checked = enabled;
+
+    if (opacityContainer) {
+      opacityContainer.style.display = enabled ? 'flex' : 'none';
+    }
+    if (metadataContainer) {
+      metadataContainer.style.display = enabled ? 'flex' : 'none';
+    }
+
+    const label = checkbox.closest('.visibility-option');
+    if (label) {
+      label.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        checkbox.checked = !checkbox.checked;
+        await window.musicAPI.setOverlayEnabled(checkbox.checked);
+        await this.syncSettingsCheckboxes();
+      });
+    }
+
+    if (opacitySlider && opacityValue) {
+      const currentOpacity = await window.musicAPI.getOverlayOpacity();
+      opacitySlider.value = Math.round(currentOpacity * 100).toString();
+      opacityValue.textContent = `${opacitySlider.value}%`;
+
+      opacitySlider.addEventListener('input', async () => {
+        const value = parseInt(opacitySlider.value, 10);
+        opacityValue.textContent = `${value}%`;
+        await window.musicAPI.setOverlayOpacity(value / 100);
+      });
+    }
+
+    if (metadataCheckbox) {
+      const showMetadata = await window.musicAPI.getOverlayShowMetadata();
+      metadataCheckbox.checked = showMetadata;
+
+      const metadataRow = metadataCheckbox.closest('.setting-row');
+      if (metadataRow) {
+        metadataRow.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          metadataCheckbox.checked = !metadataCheckbox.checked;
+          await window.musicAPI.setOverlayShowMetadata(metadataCheckbox.checked);
+        });
+      }
     }
   }
 

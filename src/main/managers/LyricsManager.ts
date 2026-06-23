@@ -33,14 +33,32 @@ interface CacheManager {
 
 class LyricsManager {
   private cache: CacheManager;
+  private readonly memoryCache = new Map<string, LyricsData>();
+  private readonly MAX_MEMORY_CACHE = 20;
 
   constructor(cache: CacheManager) {
     this.cache = cache;
   }
 
+  private setMemoryCache(key: string, value: LyricsData): void {
+    if (this.memoryCache.size >= this.MAX_MEMORY_CACHE) {
+      const firstKey = this.memoryCache.keys().next().value;
+      if (firstKey !== undefined) this.memoryCache.delete(firstKey);
+    }
+    this.memoryCache.set(key, value);
+  }
+
   async fetchLyrics(title: string, artist: string): Promise<LyricsData | null> {
     const cacheKey = `${title}-${artist}`.toLowerCase();
     const startTime = Date.now();
+
+    const memoryCached = this.memoryCache.get(cacheKey);
+    if (memoryCached) {
+      Logger.lyrics.debug(`Memory cache hit: ${title} - ${artist}`);
+      this.memoryCache.delete(cacheKey);
+      this.memoryCache.set(cacheKey, memoryCached);
+      return memoryCached;
+    }
 
     // Check cache first
     const cached = (await this.cache.get(
@@ -64,12 +82,17 @@ class LyricsManager {
         `Found (${duration}ms, synced: ${hasSync}): ${title} - ${artist}`,
       );
       this.cache.set('lyrics', cacheKey, fetched);
+      this.setMemoryCache(cacheKey, fetched);
       return fetched;
     }
 
     Logger.lyrics.warn(`Not found (${duration}ms): ${title} - ${artist}`);
 
-    // Offline fallback
+    // Cache miss sentinel in memory so repeated plays in this session skip the API
+    const sentinel: LyricsData = { synced: null, plain: null, instrumental: false };
+    this.setMemoryCache(cacheKey, sentinel);
+
+    // Offline fallback (disk may have data from a previous session)
     const offlineCache = (await this.cache.get(
       'lyrics',
       cacheKey,
@@ -80,6 +103,7 @@ class LyricsManager {
   private async fetchFromAPI(
     title: string,
     artist: string,
+    retryCount = 0,
   ): Promise<LyricsData | null> {
     try {
       const query = encodeURIComponent(`${title} ${artist}`);
@@ -100,6 +124,13 @@ class LyricsManager {
       const results = (await response.json()) as LRCLibResult[];
 
       if (!results || results.length === 0) {
+        if (retryCount === 0) {
+          Logger.lyrics.debug(
+            `Empty result, retrying in 1.5s: ${title} - ${artist}`,
+          );
+          await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+          return this.fetchFromAPI(title, artist, 1);
+        }
         return null;
       }
 

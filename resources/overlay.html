@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:">
+  <title>LyricGlow Overlay</title>
+  <link rel="stylesheet" href="./overlay.css">
+</head>
+<body>
+  <div id="overlay">
+    <button id="settings-btn" title="Open Settings">⚙</button>
+    <div id="meta-row">
+      <img id="artwork" src="" alt="" />
+      <span id="track-info">No track playing</span>
+    </div>
+    <div id="lyric-line">LyricGlow</div>
+  </div>
+  <script type="module" src="/src/overlay/index.ts"></script>
+</body>
+</html>
