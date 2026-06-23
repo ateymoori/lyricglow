@@ -44,7 +44,7 @@ function parseLRC(lrc: string): LyricLine[] {
 }
 
 function getActiveLyric(pos: number): string {
-  if (syncedLyrics.length === 0) return '—';
+  if (syncedLyrics.length === 0) return 'LyricGlow';
   let result = '';
   for (const line of syncedLyrics) {
     if (line.time <= pos) result = line.text;
@@ -53,14 +53,24 @@ function getActiveLyric(pos: number): string {
   return result || '—';
 }
 
-api.onUpdate((data: MusicData) => {
+api.onUpdate((data: MusicData | null) => {
+  if (!data) {
+    isPlaying = false;
+    position = 0;
+    lastUpdateTime = Date.now();
+    trackInfo.textContent = 'No track playing';
+    artwork.src = '';
+    artwork.classList.remove('visible');
+    return;
+  }
+
   isPlaying = data.isPlaying;
   position = data.position;
   lastUpdateTime = Date.now();
 
   const title = data.title || '';
   const artist = data.artist || '';
-  trackInfo.textContent = [title, artist].filter(Boolean).join(' • ') || '—';
+  trackInfo.textContent = [title, artist].filter(Boolean).join(' • ') || 'No track playing';
 
   if (data.artworkUrl) {
     artwork.src = data.artworkUrl;
@@ -73,7 +83,7 @@ api.onUpdate((data: MusicData) => {
 api.onLyricsUpdate((data: LyricsData | null) => {
   if (!data) {
     syncedLyrics = [];
-    lyricLine.textContent = '—';
+    lyricLine.textContent = 'LyricGlow';
     return;
   }
   if (data.synced) {
@@ -81,7 +91,7 @@ api.onLyricsUpdate((data: LyricsData | null) => {
     lyricLine.textContent = getActiveLyric(position);
   } else {
     syncedLyrics = [];
-    lyricLine.textContent = data.plain?.split('\n')[0] || '—';
+    lyricLine.textContent = data.plain?.split('\n')[0] || 'LyricGlow';
   }
 });
 

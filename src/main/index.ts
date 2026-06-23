@@ -187,18 +187,36 @@ async function getSettingsStore(): Promise<Store> {
     overlayOpacity = settingsStore.get('overlayOpacity', 0.8) as number;
     trayEnabled = settingsStore.get('trayEnabled', true) as boolean;
     overlayShowMetadata = settingsStore.get('overlayShowMetadata', true) as boolean;
+
+    // Protection: Ensure at least one UI component is enabled on startup
+    if (!windowEnabled && !overlayEnabled && !trayEnabled) {
+      overlayEnabled = true;
+      settingsStore.set('overlayEnabled', true);
+      Logger.app.warn('All UI components were disabled. Enabling Overlay Mode by default.');
+    }
   }
   return settingsStore;
 }
 
 function saveWindowEnabledSetting(enabled: boolean): void {
-  windowEnabled = enabled;
+  let finalEnabled = enabled;
+  if (!enabled && !overlayEnabled && !trayEnabled) {
+    overlayEnabled = true;
+    if (settingsStore) {
+      settingsStore.set('overlayEnabled', true);
+    }
+    createOverlayWindow();
+    updateTrayMenu();
+    Logger.app.warn('Prevented disabling all UI components: forced enabling Overlay Mode.');
+  }
+
+  windowEnabled = finalEnabled;
   if (settingsStore) {
-    settingsStore.set('windowEnabled', enabled);
+    settingsStore.set('windowEnabled', finalEnabled);
   }
 
   // Immediately apply window state
-  if (!enabled) {
+  if (!finalEnabled) {
     // User disabled window - hide it
     hideWindow();
   } else {
@@ -208,7 +226,7 @@ function saveWindowEnabledSetting(enabled: boolean): void {
     }
   }
 
-  Logger.app.info(`Window ${enabled ? 'enabled' : 'disabled'}`);
+  Logger.app.info(`Window ${finalEnabled ? 'enabled' : 'disabled'}`);
 }
 
 function saveTrayLyricsSetting(enabled: boolean): void {
@@ -302,12 +320,21 @@ function destroyOverlayWindow(): void {
 }
 
 function saveOverlayEnabledSetting(enabled: boolean): void {
-  overlayEnabled = enabled;
-  if (settingsStore) {
-    settingsStore.set('overlayEnabled', enabled);
+  let finalEnabled = enabled;
+  if (!enabled && !windowEnabled && !trayEnabled) {
+    windowEnabled = true;
+    if (settingsStore) {
+      settingsStore.set('windowEnabled', true);
+    }
+    Logger.app.warn('Prevented disabling all UI components: forced enabling Main Window.');
   }
 
-  if (enabled) {
+  overlayEnabled = finalEnabled;
+  if (settingsStore) {
+    settingsStore.set('overlayEnabled', finalEnabled);
+  }
+
+  if (finalEnabled) {
     createOverlayWindow();
     hideWindow();
   } else {
@@ -316,7 +343,7 @@ function saveOverlayEnabledSetting(enabled: boolean): void {
   }
 
   updateTrayMenu();
-  Logger.app.info(`Overlay mode ${enabled ? 'enabled' : 'disabled'}`);
+  Logger.app.info(`Overlay mode ${finalEnabled ? 'enabled' : 'disabled'}`);
 }
 
 // Window visibility control
@@ -1048,6 +1075,123 @@ function mergeArtistMetadata(
   };
 }
 
+function openSettingsWindow(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    // Temporarily enable window to show settings
+    const wasDisabled = !windowEnabled;
+    if (wasDisabled) {
+      windowEnabled = true;
+    }
+    showWindow(true); // User action: show and focus
+    mainWindow.webContents.send('open-settings');
+    if (wasDisabled) {
+      windowEnabled = false; // Restore state but keep window visible for settings
+    }
+  }
+}
+
+function setupApplicationMenu(): void {
+  const isMac = process.platform === 'darwin';
+  const template: any[] = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              { type: 'separator' },
+              {
+                label: 'Settings...',
+                accelerator: 'Cmd+,',
+                click: () => {
+                  openSettingsWindow();
+                },
+              },
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: 'File',
+      submenu: [isMac ? { role: 'close' } : { role: 'quit' }],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        ...(isMac
+          ? [
+              { role: 'pasteAndMatchStyle' },
+              { role: 'delete' },
+              { role: 'selectAll' },
+              { type: 'separator' },
+              {
+                label: 'Speech',
+                submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }],
+              },
+            ]
+          : [{ role: 'delete' }, { type: 'separator' }, { role: 'selectAll' }]),
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        ...(isMac
+          ? [
+              { type: 'separator' },
+              { role: 'front' },
+              { type: 'separator' },
+              { role: 'window' },
+            ]
+          : [{ role: 'close' }]),
+      ],
+    },
+    {
+      role: 'help',
+      submenu: [
+        {
+          label: 'Learn More',
+          click: async () => {
+            await shell.openExternal('https://github.com/ateymoori/lyricglow');
+          },
+        },
+      ],
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
 function updateTrayMenu(): void {
   if (!tray) return;
 
@@ -1087,18 +1231,7 @@ function updateTrayMenu(): void {
     {
       label: 'Settings',
       click: () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          // Temporarily enable window to show settings
-          const wasDisabled = !windowEnabled;
-          if (wasDisabled) {
-            windowEnabled = true;
-          }
-          showWindow(true); // User action: show and focus
-          mainWindow.webContents.send('open-settings');
-          if (wasDisabled) {
-            windowEnabled = false; // Restore state but keep window visible for settings
-          }
-        }
+        openSettingsWindow();
       },
     },
     {
@@ -1182,7 +1315,7 @@ function createWindow(): void {
     skipTaskbar: true,
     focusable: true,
     hasShadow: true,
-    show: true,
+    show: windowEnabled && !overlayEnabled,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -1245,6 +1378,7 @@ app.whenReady().then(async () => {
 
   // Initialize settings store and load settings
   await getSettingsStore();
+  setupApplicationMenu();
   Logger.app.info(`Window: ${windowEnabled ? 'enabled' : 'disabled'}`);
   Logger.app.info(
     `Auto-hide mode: ${autoHideEnabled ? 'enabled' : 'disabled'}`,
@@ -1389,17 +1523,7 @@ ipcMain.handle('overlay:set-opacity', (_event, opacity: number) => {
 });
 
 ipcMain.on('overlay:open-settings', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    const wasDisabled = !windowEnabled;
-    if (wasDisabled) {
-      windowEnabled = true;
-    }
-    showWindow(true);
-    mainWindow.webContents.send('open-settings');
-    if (wasDisabled) {
-      windowEnabled = false;
-    }
-  }
+  openSettingsWindow();
 });
 
 ipcMain.handle('settings:get-tray-icon-enabled', () => trayEnabled);
@@ -1424,12 +1548,22 @@ ipcMain.handle('overlay:set-show-metadata', (_event, enabled: boolean) => {
 });
 
 function updateTrayVisibility(enabled: boolean): void {
-  trayEnabled = enabled;
-  if (settingsStore) {
-    settingsStore.set('trayEnabled', enabled);
+  let finalEnabled = enabled;
+  if (!enabled && !windowEnabled && !overlayEnabled) {
+    overlayEnabled = true;
+    if (settingsStore) {
+      settingsStore.set('overlayEnabled', true);
+    }
+    createOverlayWindow();
+    Logger.app.warn('Prevented disabling all UI components: forced enabling Overlay Mode.');
   }
 
-  if (enabled) {
+  trayEnabled = finalEnabled;
+  if (settingsStore) {
+    settingsStore.set('trayEnabled', finalEnabled);
+  }
+
+  if (finalEnabled) {
     if (!tray) {
       createTray();
     }

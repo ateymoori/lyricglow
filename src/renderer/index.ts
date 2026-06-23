@@ -2242,6 +2242,27 @@ class SettingsHandler {
     }
   }
 
+  async syncSettingsCheckboxes(): Promise<void> {
+    const trayCheckbox = document.getElementById('settings-tray-icon-enabled') as HTMLInputElement;
+    const overlayCheckbox = document.getElementById('settings-overlay-enabled') as HTMLInputElement;
+    const opacityContainer = document.getElementById('overlay-opacity-container') as HTMLElement;
+    const metadataContainer = document.getElementById('overlay-metadata-container') as HTMLElement;
+
+    if (trayCheckbox) {
+      trayCheckbox.checked = await window.musicAPI.getTrayIconEnabled();
+    }
+    if (overlayCheckbox) {
+      const overlayEnabled = await window.musicAPI.getOverlayEnabled();
+      overlayCheckbox.checked = overlayEnabled;
+      if (opacityContainer) {
+        opacityContainer.style.display = overlayEnabled ? 'flex' : 'none';
+      }
+      if (metadataContainer) {
+        metadataContainer.style.display = overlayEnabled ? 'flex' : 'none';
+      }
+    }
+  }
+
   async initTrayIconVisibility(): Promise<void> {
     const checkbox = document.getElementById(
       'settings-tray-icon-enabled',
@@ -2259,6 +2280,7 @@ class SettingsHandler {
 
         checkbox.checked = !checkbox.checked;
         await window.musicAPI.setTrayIconEnabled(checkbox.checked);
+        await this.syncSettingsCheckboxes();
       });
     }
   }
@@ -2324,12 +2346,7 @@ class SettingsHandler {
 
         checkbox.checked = !checkbox.checked;
         await window.musicAPI.setOverlayEnabled(checkbox.checked);
-        if (opacityContainer) {
-          opacityContainer.style.display = checkbox.checked ? 'flex' : 'none';
-        }
-        if (metadataContainer) {
-          metadataContainer.style.display = checkbox.checked ? 'flex' : 'none';
-        }
+        await this.syncSettingsCheckboxes();
       });
     }
 
