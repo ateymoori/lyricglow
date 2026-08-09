@@ -1,7 +1,9 @@
 /**
  * Image Cache Manager
  *
- * Handles downloading and caching album artwork with offline fallback support.
+ * Downloads artwork into the cache directory and hands the renderer a
+ * lyricglow-cache:// URL for it. The bytes stay on disk and are streamed by the
+ * protocol handler instead of being base64-encoded through IPC.
  */
 
 import Logger from '../../shared/utils/Logger';
@@ -18,25 +20,22 @@ class ImageCacheManager {
   async getImage(url: string): Promise<string | null> {
     if (!url || url === '') return null;
 
-    // Check cache first
-    const cached = await this.cache.get('images', url);
-    if (cached) {
-      return cached as string;
-    }
+    // Already cached and fresh
+    const cached = await this.cache.getFileUrl('images', url);
+    if (cached) return cached;
 
     // Download if not cached
     const downloaded = await this.downloadImage(url);
     if (downloaded) {
-      this.cache.set('images', url, downloaded);
-      return downloaded;
+      await this.cache.set('images', url, downloaded);
+      return this.cache.getFileUrl('images', url, true);
     }
 
-    // Offline fallback
-    const offlineCache = await this.cache.get('images', url);
-    return offlineCache as string | null;
+    // Offline fallback: an expired copy still beats a missing image
+    return this.cache.getFileUrl('images', url, true);
   }
 
-  private async downloadImage(url: string): Promise<string | null> {
+  private async downloadImage(url: string): Promise<Buffer | null> {
     try {
       const response = await SecureFetch.fetch(url);
 
@@ -45,9 +44,7 @@ class ImageCacheManager {
         return null;
       }
 
-      const buffer = await response.buffer();
-      const base64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
-      return base64;
+      return await response.buffer();
     } catch (error) {
       Logger.cache.error('Image download error', error as Error);
       return null;

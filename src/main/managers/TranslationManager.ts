@@ -6,6 +6,10 @@
  */
 
 import https from 'node:https';
+import {
+  type Language,
+  SUPPORTED_LANGUAGES,
+} from '../../shared/constants/languages';
 import Logger from '../../shared/utils/Logger';
 import type UnifiedCacheManager from './UnifiedCacheManager';
 
@@ -17,56 +21,14 @@ const LINGVA_INSTANCES = [
   'translate.projectsegfau.lt',
 ];
 
-// Supported languages with display names (40 most popular, sorted alphabetically)
-export const SUPPORTED_LANGUAGES: {
-  code: string;
-  name: string;
-  rtl: boolean;
-}[] = [
-  { code: 'af', name: 'Afrikaans', rtl: false },
-  { code: 'ar', name: 'Arabic', rtl: true },
-  { code: 'bn', name: 'Bengali', rtl: false },
-  { code: 'bg', name: 'Bulgarian', rtl: false },
-  { code: 'ca', name: 'Catalan', rtl: false },
-  { code: 'zh', name: 'Chinese', rtl: false },
-  { code: 'hr', name: 'Croatian', rtl: false },
-  { code: 'cs', name: 'Czech', rtl: false },
-  { code: 'da', name: 'Danish', rtl: false },
-  { code: 'nl', name: 'Dutch', rtl: false },
-  { code: 'en', name: 'English', rtl: false },
-  { code: 'fi', name: 'Finnish', rtl: false },
-  { code: 'fr', name: 'French', rtl: false },
-  { code: 'de', name: 'German', rtl: false },
-  { code: 'el', name: 'Greek', rtl: false },
-  { code: 'he', name: 'Hebrew', rtl: true },
-  { code: 'hi', name: 'Hindi', rtl: false },
-  { code: 'hu', name: 'Hungarian', rtl: false },
-  { code: 'id', name: 'Indonesian', rtl: false },
-  { code: 'it', name: 'Italian', rtl: false },
-  { code: 'ja', name: 'Japanese', rtl: false },
-  { code: 'ko', name: 'Korean', rtl: false },
-  { code: 'lv', name: 'Latvian', rtl: false },
-  { code: 'lt', name: 'Lithuanian', rtl: false },
-  { code: 'ms', name: 'Malay', rtl: false },
-  { code: 'no', name: 'Norwegian', rtl: false },
-  { code: 'fa', name: 'Persian', rtl: true },
-  { code: 'pl', name: 'Polish', rtl: false },
-  { code: 'pt', name: 'Portuguese', rtl: false },
-  { code: 'ro', name: 'Romanian', rtl: false },
-  { code: 'ru', name: 'Russian', rtl: false },
-  { code: 'sr', name: 'Serbian', rtl: false },
-  { code: 'sk', name: 'Slovak', rtl: false },
-  { code: 'sl', name: 'Slovenian', rtl: false },
-  { code: 'es', name: 'Spanish', rtl: false },
-  { code: 'sw', name: 'Swahili', rtl: false },
-  { code: 'sv', name: 'Swedish', rtl: false },
-  { code: 'ta', name: 'Tamil', rtl: false },
-  { code: 'th', name: 'Thai', rtl: false },
-  { code: 'tr', name: 'Turkish', rtl: false },
-  { code: 'uk', name: 'Ukrainian', rtl: false },
-  { code: 'ur', name: 'Urdu', rtl: true },
-  { code: 'vi', name: 'Vietnamese', rtl: false },
-];
+// Give up on the per-line fallback once the service keeps failing
+const MAX_LINE_FAILURES = 5;
+
+// Lines translated concurrently in the per-line fallback
+const LINE_CHUNK_SIZE = 4;
+
+// Language list lives in shared/ so the renderer can use the same data
+export { SUPPORTED_LANGUAGES };
 
 interface TranslationResult {
   original: string[];
@@ -115,19 +77,14 @@ class TranslationManager {
 
     if (!nonEmptyLines.length) return null;
 
-    // Join non-empty lines with separator
-    const separator = '\n\n';
-    const batchText = nonEmptyLines.map((l) => l.text).join(separator);
-
-    // Translate batch
     const startTime = Date.now();
-    const translatedBatch = await this.translateWithFallback(
-      batchText,
+    const translatedParts = await this.translateLines(
+      nonEmptyLines.map((l) => l.text),
       targetLang,
     );
     const duration = Date.now() - startTime;
 
-    if (!translatedBatch) {
+    if (!translatedParts) {
       Logger.lyrics.warn(`Translation failed (${duration}ms): ${cacheKey}`);
       return null;
     }
@@ -135,9 +92,6 @@ class TranslationManager {
     Logger.lyrics.info(
       `Translation done (${duration}ms): ${cacheKey} → ${targetLang}`,
     );
-
-    // Split translated text back into lines
-    const translatedParts = translatedBatch.split(separator);
 
     // Rebuild full array with empty lines preserved
     const translated: string[] = new Array(lines.length).fill('');
@@ -160,6 +114,79 @@ class TranslationManager {
     this.cache.set('translations', `${cacheKey}:${targetLang}`, result);
 
     return result;
+  }
+
+  /**
+   * Translate a list of lines, returning exactly one result per input line.
+   *
+   * Fast path is a single batched request. The batch is only trusted when the
+   * response splits back into the same number of parts - a translator that
+   * drops, merges or adds a separator would otherwise shift every following
+   * line by one. Anything else falls back to one request per line.
+   */
+  private async translateLines(
+    lines: string[],
+    targetLang: string,
+  ): Promise<string[] | null> {
+    const separator = '\n\n';
+    const batch = await this.translateWithFallback(
+      lines.join(separator),
+      targetLang,
+    );
+
+    if (batch) {
+      const parts = batch.split(separator);
+      if (parts.length === lines.length) {
+        return parts;
+      }
+      Logger.lyrics.warn(
+        `Batch translation returned ${parts.length} of ${lines.length} lines, retrying per line`,
+      );
+    }
+
+    return this.translateEachLine(lines, targetLang);
+  }
+
+  /**
+   * Translate one line per request - always index-accurate.
+   *
+   * Runs in small parallel chunks: a whole song one-at-a-time would take far
+   * too long, and firing every line at once would hammer a public instance.
+   */
+  private async translateEachLine(
+    lines: string[],
+    targetLang: string,
+  ): Promise<string[] | null> {
+    const translated: string[] = new Array(lines.length).fill('');
+    let failures = 0;
+    let successes = 0;
+
+    for (let start = 0; start < lines.length; start += LINE_CHUNK_SIZE) {
+      const chunk = lines.slice(start, start + LINE_CHUNK_SIZE);
+
+      const results = await Promise.all(
+        chunk.map((line) => this.translateWithFallback(line, targetLang)),
+      );
+
+      results.forEach((result, offset) => {
+        if (result === null) {
+          failures++; // Slot stays empty so later lines keep their index
+        } else {
+          successes++;
+          translated[start + offset] = result;
+        }
+      });
+
+      if (failures > MAX_LINE_FAILURES) {
+        Logger.lyrics.warn('Per-line translation aborted: too many failures');
+        return null;
+      }
+    }
+
+    // Nothing came back: report failure instead of caching blank translations
+    if (successes === 0) return null;
+
+    return translated;
   }
 
   /**
@@ -255,7 +282,7 @@ class TranslationManager {
   /**
    * Get list of supported languages
    */
-  getSupportedLanguages(): { code: string; name: string; rtl: boolean }[] {
+  getSupportedLanguages(): Language[] {
     return SUPPORTED_LANGUAGES;
   }
 

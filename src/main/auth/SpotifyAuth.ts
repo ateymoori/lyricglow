@@ -12,6 +12,7 @@ import path from 'node:path';
 import { safeStorage, shell } from 'electron';
 import type Store from 'electron-store';
 import Logger from '../../shared/utils/Logger';
+import { getStore } from '../store';
 
 // Spotify API response interfaces
 interface SpotifyTokenResponse {
@@ -52,22 +53,39 @@ class SpotifyAuth {
   private clientId: string | null;
   private redirectUri: string;
   private codeVerifier: string | null;
+  private authState: string | null;
   private tokenRefreshInterval: NodeJS.Timeout | null;
+  private storeReady: Promise<void>;
 
   constructor() {
     this.store = null;
-    this.initStore();
+    this.storeReady = this.initStore();
     this.clientId = null;
     this.redirectUri = 'musicdisplay://callback';
     this.codeVerifier = null;
+    this.authState = null;
     this.tokenRefreshInterval = null;
 
     this.loadConfig();
   }
 
   private async initStore(): Promise<void> {
-    const StoreModule = await import('electron-store');
-    this.store = new StoreModule.default();
+    try {
+      // Shared with window/visibility settings: separate instances over the
+      // same config file can overwrite each other's writes
+      this.store = await getStore();
+    } catch (error) {
+      Logger.auth.error('Failed to initialize token store', error as Error);
+    }
+  }
+
+  /**
+   * Resolves once the token store is loaded.
+   * Must be awaited before any synchronous store access (isLoggedIn) so that
+   * a stored session is not reported as logged out on a fast startup.
+   */
+  async whenReady(): Promise<void> {
+    await this.storeReady;
   }
 
   private loadConfig(): void {
@@ -105,6 +123,19 @@ class SpotifyAuth {
     return crypto.randomBytes(64).toString('base64url');
   }
 
+  /**
+   * Constant-time comparison of the callback state against the stored one
+   */
+  private statesMatch(received: string): boolean {
+    if (!this.authState) return false;
+
+    const expected = Buffer.from(this.authState, 'utf8');
+    const actual = Buffer.from(received, 'utf8');
+
+    if (expected.length !== actual.length) return false;
+    return crypto.timingSafeEqual(expected, actual);
+  }
+
   private async generateCodeChallenge(verifier: string): Promise<string> {
     const hash = crypto.createHash('sha256').update(verifier).digest();
     return hash.toString('base64url');
@@ -116,6 +147,9 @@ class SpotifyAuth {
 
     const scopes = ['user-read-private', 'user-read-email'];
 
+    // Remembered so the callback can prove it belongs to this flow
+    this.authState = crypto.randomBytes(16).toString('hex');
+
     const params = new URLSearchParams({
       client_id: this.clientId!,
       response_type: 'code',
@@ -123,7 +157,7 @@ class SpotifyAuth {
       code_challenge_method: 'S256',
       code_challenge: codeChallenge,
       scope: scopes.join(' '),
-      state: crypto.randomBytes(16).toString('hex'),
+      state: this.authState,
     });
 
     return `https://accounts.spotify.com/authorize?${params.toString()}`;
@@ -248,6 +282,7 @@ class SpotifyAuth {
   }
 
   async getAccessToken(): Promise<string | null> {
+    await this.storeReady;
     const tokens = this.getStoredTokens();
 
     if (!tokens) {
@@ -331,14 +366,24 @@ class SpotifyAuth {
   }
 
   async handleCallback(callbackUrl: string): Promise<boolean> {
+    await this.storeReady;
+
     try {
       const url = new URL(callbackUrl);
       const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
 
       if (error) {
         throw new Error(`Authorization error: ${error}`);
       }
+
+      // Reject callbacks that do not carry the state we generated: anything
+      // else was not started by this app
+      if (!this.authState || !state || !this.statesMatch(state)) {
+        throw new Error('Invalid state parameter. Please start login again.');
+      }
+      this.authState = null;
 
       if (!code) {
         throw new Error('No authorization code received');

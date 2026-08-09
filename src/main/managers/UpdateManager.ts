@@ -83,21 +83,44 @@ class UpdateManager {
   }
 
   /**
-   * Compare semantic versions (simple implementation)
+   * Split a version into its numeric core and pre-release tag.
+   * "1.2.3-beta.1" -> { parts: [1, 2, 3], prerelease: true }
+   */
+  private parseVersion(version: string): {
+    parts: number[];
+    prerelease: boolean;
+  } {
+    const cleaned = version.trim().replace(/^v/i, '');
+    const [core = '', ...rest] = cleaned.split(/[-+]/);
+
+    const parts = [0, 1, 2].map((i) => {
+      // parseInt stops at the first non-digit, so "1rc" still reads as 1
+      const value = parseInt(core.split('.')[i] ?? '0', 10);
+      return Number.isNaN(value) ? 0 : value;
+    });
+
+    return { parts, prerelease: rest.length > 0 && rest[0] !== '' };
+  }
+
+  /**
+   * Compare semantic versions.
+   * Pre-release tags never break the comparison, and a pre-release ranks below
+   * the release with the same numbers (1.0.0-beta < 1.0.0).
    */
   private isNewerVersion(current: string, latest: string): boolean {
-    const currentParts = current.split('.').map(Number);
-    const latestParts = latest.split('.').map(Number);
+    const curr = this.parseVersion(current);
+    const lat = this.parseVersion(latest);
 
     for (let i = 0; i < 3; i++) {
-      const curr = currentParts[i] || 0;
-      const lat = latestParts[i] || 0;
+      const c = curr.parts[i] ?? 0;
+      const l = lat.parts[i] ?? 0;
 
-      if (lat > curr) return true;
-      if (lat < curr) return false;
+      if (l > c) return true;
+      if (l < c) return false;
     }
 
-    return false;
+    // Same numbers: only a release is newer than the pre-release of it
+    return curr.prerelease && !lat.prerelease;
   }
 
   /**

@@ -170,7 +170,7 @@ class TheAudioDBManager {
     }
 
     Logger.metadata.warn(`TheAudioDB not found (${duration}ms): ${artistName}`);
-    const offlineCache = await this.cache.get('metadata', cacheKey);
+    const offlineCache = await this.cache.getStale('metadata', cacheKey);
     return offlineCache as AudioDBArtistData | null;
   }
 

@@ -8,6 +8,7 @@
 import { exec } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   app,
   BrowserWindow,
@@ -15,12 +16,15 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
+  net,
+  protocol,
   screen,
   shell,
   Tray,
 } from 'electron';
 import type Store from 'electron-store';
 import Logger from '../shared/utils/Logger';
+import { type LyricLine, parseLRC } from '../shared/utils/LrcParser';
 import SpotifyAuth from './auth/SpotifyAuth';
 import ImageCacheManager from './managers/ImageCacheManager';
 import LyricsManager from './managers/LyricsManager';
@@ -29,8 +33,11 @@ import TheAudioDBManager from './managers/TheAudioDBManager';
 import TranslationManager, {
   SUPPORTED_LANGUAGES,
 } from './managers/TranslationManager';
-import UnifiedCacheManager from './managers/UnifiedCacheManager';
+import UnifiedCacheManager, {
+  CACHE_SCHEME,
+} from './managers/UnifiedCacheManager';
 import UpdateManager from './managers/UpdateManager';
+import { getStore } from './store';
 
 // Type definitions
 interface Config {
@@ -71,6 +78,25 @@ type ExternalMetadata = unknown;
 
 // Module state for app quitting
 let isAppQuitting = false;
+
+/**
+ * Poll cadence. Both the renderer and this process interpolate the playback
+ * position between polls, so polling fast buys nothing but osascript processes.
+ * Media controls trigger an immediate extra poll so the UI still reacts at once.
+ */
+const POLL_INTERVAL_PLAYING = 1800;
+const POLL_INTERVAL_PAUSED = 3000;
+const POLL_INTERVAL_IDLE = 5000;
+const PROMPT_POLL_DELAY = 250;
+
+// Schemes the renderer may ask the OS to open: web links, Spotify deep links,
+// and the System Settings pane the permission onboarding points at
+const EXTERNAL_URL_SCHEMES = [
+  'http:',
+  'https:',
+  'spotify:',
+  'x-apple.systempreferences:',
+];
 
 function loadConfig(): Config {
   try {
@@ -115,7 +141,8 @@ let currentTrackKey: string | null = null;
 let tray: Tray | null = null;
 let cachedScriptPath: string | null = null;
 let lastTrackData: TrackData | null = null;
-let currentPollInterval = 1000;
+let currentPollInterval = POLL_INTERVAL_IDLE;
+let promptPollTimeout: NodeJS.Timeout | null = null;
 let automationPermissionDenied = false;
 
 // Window behavior management
@@ -132,17 +159,37 @@ let trayLyricsEnabled = true; // Show lyrics in system tray (default: enabled)
 let translationEnabled = false; // Enable lyrics translation (default: disabled)
 let translationTargetLang = 'en'; // Target language code (default: English)
 let currentSyncedLyrics: string | null = null; // Store raw synced lyrics for refresh
-let translationInProgress = false; // Prevent concurrent translation calls
+let translationGeneration = 0; // Bumped per job so stale results can be dropped
 
 // Lyrics sync state (managed in main process for independent tray updates)
-let currentLyrics: Array<{ time: number; text: string }> = [];
+let currentLyrics: LyricLine[] = [];
 let currentLyricIndex = 0;
-let lyricsSyncInterval: NodeJS.Timeout | null = null;
+let lyricsSyncTimeout: NodeJS.Timeout | null = null;
+let hasShownTrayLine = false;
 
 // Internal position tracking (for accurate tray sync)
 let internalPosition = 0;
 let lastPositionUpdate = Date.now();
 let isInternalPlaying = false;
+
+// GPU switches only take effect before the app is ready
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds');
+
+// Cached artwork is served from disk over this scheme instead of being copied
+// through IPC as base64 (must be declared before app ready)
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: CACHE_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
+  },
+]);
 
 // Register custom protocol for OAuth callback (must be before app.whenReady)
 if (process.defaultApp) {
@@ -155,24 +202,16 @@ if (process.defaultApp) {
   app.setAsDefaultProtocolClient('musicdisplay');
 }
 
-// Settings store management
-async function getSettingsStore(): Promise<Store> {
-  if (!settingsStore) {
-    const StoreModule = await import('electron-store');
-    settingsStore = new StoreModule.default();
-    autoHideEnabled = settingsStore.get('autoHideEnabled', false) as boolean;
-    windowEnabled = settingsStore.get('windowEnabled', true) as boolean;
-    trayLyricsEnabled = settingsStore.get('trayLyricsEnabled', true) as boolean;
-    translationEnabled = settingsStore.get(
-      'translationEnabled',
-      false,
-    ) as boolean;
-    translationTargetLang = settingsStore.get(
-      'translationTargetLang',
-      'en',
-    ) as string;
-  }
-  return settingsStore;
+// Settings store management (one shared instance - see main/store.ts)
+async function loadSettings(): Promise<void> {
+  const store = await getStore();
+  settingsStore = store;
+
+  autoHideEnabled = store.get('autoHideEnabled', false) as boolean;
+  windowEnabled = store.get('windowEnabled', true) as boolean;
+  trayLyricsEnabled = store.get('trayLyricsEnabled', true) as boolean;
+  translationEnabled = store.get('translationEnabled', false) as boolean;
+  translationTargetLang = store.get('translationTargetLang', 'en') as string;
 }
 
 function saveWindowEnabledSetting(enabled: boolean): void {
@@ -204,14 +243,10 @@ function saveTrayLyricsSetting(enabled: boolean): void {
   // Clear tray immediately if disabled, restart sync if enabled
   if (!enabled) {
     if (tray) tray.setTitle('');
-  } else {
-    // Re-sync current line if we have lyrics
-    if (currentLyrics.length > 0 && currentLyricIndex < currentLyrics.length) {
-      const currentLine = currentLyrics[currentLyricIndex];
-      if (currentLine) {
-        updateTrayLyrics(currentLine.text);
-      }
-    }
+  } else if (currentLyrics.length > 0) {
+    // Re-sync to whatever line is due right now
+    hasShownTrayLine = false;
+    scheduleTrayLyricUpdate();
   }
 
   Logger.app.info(`Tray lyrics ${enabled ? 'enabled' : 'disabled'}`);
@@ -220,6 +255,12 @@ function saveTrayLyricsSetting(enabled: boolean): void {
 // Window visibility control
 function showWindow(shouldFocus: boolean = false): void {
   if (!windowEnabled) return; // Don't show if window is disabled by user
+
+  // Cancel a pending auto-hide: showing the window always wins
+  if (hideTimeout) {
+    clearTimeout(hideTimeout);
+    hideTimeout = null;
+  }
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
@@ -241,6 +282,11 @@ function handleTrayClick(): void {
       mainWindow.focus();
     } else {
       manualOverride = false;
+      // Clicking the tray icon is an explicit request to see the window, so
+      // re-enable it if the user previously closed it with the × button
+      if (!windowEnabled) {
+        saveWindowEnabledSetting(true);
+      }
       showWindow(true); // User action: focus the window
       updateTrayMenu();
       Logger.app.debug('Window shown via tray click');
@@ -284,33 +330,6 @@ function handleWindowVisibility(isPlaying: boolean): void {
 }
 
 /**
- * Parse synced lyrics text into time-stamped lines
- */
-function parseSyncedLyrics(
-  syncedText: string,
-): Array<{ time: number; text: string }> {
-  const lines: Array<{ time: number; text: string }> = [];
-  const lrcLines = syncedText.split('\n');
-
-  for (const line of lrcLines) {
-    const match = line.match(/\[(\d+):(\d+\.\d+)\](.*)/);
-    if (match?.[1] && match[2] && match[3] !== undefined) {
-      const minutes = parseInt(match[1], 10);
-      const seconds = parseFloat(match[2]);
-      const text = match[3].trim();
-      const time = minutes * 60 + seconds;
-
-      if (text) {
-        // Only add non-empty lyrics
-        lines.push({ time, text });
-      }
-    }
-  }
-
-  return lines.sort((a, b) => a.time - b.time);
-}
-
-/**
  * Calculate current position based on elapsed time (accurate like renderer)
  */
 function getCurrentPosition(): number {
@@ -337,6 +356,7 @@ function updateInternalPosition(position: number, isPlaying: boolean): void {
   // Detect if position jumped significantly (seek or track change)
   const positionDiff = Math.abs(position - internalPosition);
   const needsHardSync = positionDiff > 1.0 || internalPosition === 0;
+  const playStateChanged = isInternalPlaying !== isPlaying;
 
   if (needsHardSync) {
     internalPosition = position;
@@ -344,6 +364,66 @@ function updateInternalPosition(position: number, isPlaying: boolean): void {
 
   isInternalPlaying = isPlaying;
   lastPositionUpdate = Date.now();
+
+  // A seek or a play/pause invalidates the pending tray wake-up
+  if (needsHardSync || playStateChanged) {
+    scheduleTrayLyricUpdate();
+  }
+}
+
+/**
+ * Index of the line that should be showing at the given position
+ */
+function findLyricIndex(position: number, from: number): number {
+  let index = Math.min(Math.max(from, 0), currentLyrics.length - 1);
+
+  while (index < currentLyrics.length - 1) {
+    const nextLine = currentLyrics[index + 1];
+    if (!nextLine || nextLine.time > position) break;
+    index++;
+  }
+
+  while (index > 0) {
+    const line = currentLyrics[index];
+    if (!line || line.time <= position) break;
+    index--;
+  }
+
+  return index;
+}
+
+/**
+ * Show the line for the current position and sleep until the next one is due.
+ *
+ * Sleeping exactly as long as the line lasts costs no CPU between lines, which
+ * a fixed 100ms poll cannot say. Must be re-run whenever the position jumps.
+ */
+function scheduleTrayLyricUpdate(): void {
+  if (lyricsSyncTimeout) {
+    clearTimeout(lyricsSyncTimeout);
+    lyricsSyncTimeout = null;
+  }
+
+  if (!currentLyrics.length) return;
+
+  const position = getCurrentPosition();
+  const index = findLyricIndex(position, currentLyricIndex);
+
+  if (index !== currentLyricIndex || !hasShownTrayLine) {
+    currentLyricIndex = index;
+    hasShownTrayLine = true;
+    const line = currentLyrics[index];
+    if (line) updateTrayLyrics(line.text);
+  }
+
+  // Paused: nothing more is due until playback resumes
+  if (!isInternalPlaying) return;
+
+  const nextLine = currentLyrics[index + 1];
+  if (!nextLine) return; // Last line - nothing left to schedule
+
+  const delay = Math.max(30, (nextLine.time - position) * 1000);
+  lyricsSyncTimeout = setTimeout(scheduleTrayLyricUpdate, delay);
 }
 
 /**
@@ -356,63 +436,17 @@ function startLyricsSync(lyricsData: {
   // Stop existing sync
   stopLyricsSync();
 
-  // Parse synced lyrics
+  // Never let the previous track's line linger while the new one starts
+  if (tray) tray.setTitle('');
+
+  // Parse synced lyrics (shared parser: indices match renderer and translations)
   if (lyricsData?.synced) {
-    currentLyrics = parseSyncedLyrics(lyricsData.synced);
+    currentLyrics = parseLRC(lyricsData.synced);
     currentLyricIndex = 0;
+    hasShownTrayLine = false;
 
-    // Immediately show the correct line for current position (atomic sync with window)
-    if (currentLyrics.length > 0) {
-      const position = getCurrentPosition();
-
-      // Find current line (same logic as interval)
-      let initialIndex = 0;
-      while (initialIndex < currentLyrics.length - 1) {
-        const nextLine = currentLyrics[initialIndex + 1];
-        if (!nextLine || nextLine.time > position) break;
-        initialIndex++;
-      }
-
-      currentLyricIndex = initialIndex;
-      const currentLine = currentLyrics[currentLyricIndex];
-      if (currentLine) {
-        updateTrayLyrics(currentLine.text);
-      }
-    }
-
-    // Start sync interval (100ms for smooth updates, using calculated position)
-    lyricsSyncInterval = setInterval(() => {
-      if (!isInternalPlaying) return;
-
-      // Use time-based calculated position (not polling position)
-      const position = getCurrentPosition();
-
-      // Find current lyric line based on position
-      let newIndex = currentLyricIndex;
-
-      // Search forward
-      while (newIndex < currentLyrics.length - 1) {
-        const nextLine = currentLyrics[newIndex + 1];
-        if (!nextLine || nextLine.time > position) break;
-        newIndex++;
-      }
-
-      // Search backward (in case of seek)
-      while (newIndex > 0) {
-        const currentLine = currentLyrics[newIndex];
-        if (!currentLine || currentLine.time <= position) break;
-        newIndex--;
-      }
-
-      // Update tray if line changed
-      if (newIndex !== currentLyricIndex) {
-        currentLyricIndex = newIndex;
-        const currentLine = currentLyrics[currentLyricIndex];
-        if (currentLine) {
-          updateTrayLyrics(currentLine.text);
-        }
-      }
-    }, 100);
+    // Shows the line for the current position, then sleeps until the next one
+    scheduleTrayLyricUpdate();
 
     Logger.app.debug('Lyrics sync started in main process');
   }
@@ -422,12 +456,13 @@ function startLyricsSync(lyricsData: {
  * Stop lyrics sync loop
  */
 function stopLyricsSync(): void {
-  if (lyricsSyncInterval) {
-    clearInterval(lyricsSyncInterval);
-    lyricsSyncInterval = null;
+  if (lyricsSyncTimeout) {
+    clearTimeout(lyricsSyncTimeout);
+    lyricsSyncTimeout = null;
   }
   currentLyrics = [];
   currentLyricIndex = 0;
+  hasShownTrayLine = false;
   internalPosition = 0;
   isInternalPlaying = false;
   lastPositionUpdate = Date.now();
@@ -438,6 +473,9 @@ function stopLyricsSync(): void {
  */
 function updateTrayLyrics(text: string): void {
   if (!tray || !trayLyricsEnabled) return;
+
+  // Gap lines (no text) keep the previous line on screen instead of blanking
+  if (!text.trim()) return;
 
   // Truncate to 60 characters with ellipsis
   const maxLength = 60;
@@ -453,7 +491,7 @@ function updateTrayLyrics(text: string): void {
  */
 function handleTrayLyricsUpdate(text: string): void {
   // Only accept renderer updates if main sync is not active
-  if (lyricsSyncInterval) return; // Main process is handling it
+  if (currentLyrics.length) return; // Main process is handling it
 
   updateTrayLyrics(text);
 }
@@ -567,11 +605,22 @@ end if
 
 return output`;
 
+  // Kept in the app's own data directory, not the shared temp dir: anything
+  // running as this user could otherwise swap the file between the write and
+  // the osascript call and have its own script executed instead.
   cachedScriptPath = path.join(
-    app.getPath('temp'),
+    app.getPath('userData'),
     'lyricglow-music-poll.scpt',
   );
-  fs.writeFileSync(cachedScriptPath, script, 'utf8');
+
+  // Drop any leftover file first - writeFileSync only applies mode on create
+  try {
+    fs.unlinkSync(cachedScriptPath);
+  } catch (_error) {
+    // Nothing to remove
+  }
+
+  fs.writeFileSync(cachedScriptPath, script, { encoding: 'utf8', mode: 0o600 });
   Logger.app.info('AppleScript cached for polling');
 }
 
@@ -629,12 +678,19 @@ function pollMusicState(): void {
 
     try {
       const trackData = JSON.parse(scriptOutput) as TrackData;
+      const trackKey = `${trackData.title}-${trackData.artist}`;
       const dataChanged =
         !lastTrackData ||
         lastTrackData.title !== trackData.title ||
         lastTrackData.artist !== trackData.artist ||
         lastTrackData.isPlaying !== trackData.isPlaying ||
         Math.abs((lastTrackData.position || 0) - (trackData.position || 0)) > 2;
+
+      // Re-anchor the interpolated clock on every poll, even when nothing
+      // changed enough to broadcast - the tray schedule depends on it
+      if (currentTrackKey === trackKey) {
+        updateInternalPosition(trackData.position, trackData.isPlaying);
+      }
 
       if (dataChanged) {
         lastTrackData = trackData;
@@ -650,10 +706,12 @@ function pollMusicState(): void {
 }
 
 function updatePollInterval(trackData: TrackData | null): void {
-  let newInterval = 5000;
+  let newInterval = POLL_INTERVAL_IDLE;
 
   if (trackData?.nowPlayingAvailable) {
-    newInterval = trackData.isPlaying ? 500 : 2000;
+    newInterval = trackData.isPlaying
+      ? POLL_INTERVAL_PLAYING
+      : POLL_INTERVAL_PAUSED;
   }
 
   if (newInterval !== currentPollInterval) {
@@ -667,55 +725,57 @@ function updatePollInterval(trackData: TrackData | null): void {
 }
 
 /**
- * Translate lyrics asynchronously and send to renderer when ready
- * Non-blocking - app continues working while translation happens in background
- * Includes race condition protection to prevent stale translations
+ * Tell the renderer whether a translation is currently being fetched
+ */
+function sendTranslationStatus(pending: boolean): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('translation:status', { pending });
+  }
+}
+
+/**
+ * Translate lyrics in the background and send them when they arrive.
+ *
+ * Jobs supersede rather than skip: starting a new one makes every older job
+ * stale, and a stale result is dropped on arrival. Skipping instead (the old
+ * behaviour) left a track that changed mid-fetch untranslated forever.
  */
 async function translateLyricsAsync(
   syncedLyrics: string,
   trackKey: string,
 ): Promise<void> {
-  // Prevent concurrent translation calls - last one wins
-  if (translationInProgress) {
-    Logger.lyrics.debug('Translation skipped: another in progress');
-    return;
-  }
-
-  translationInProgress = true;
+  const generation = ++translationGeneration;
   const targetLang = translationTargetLang; // Capture at call time
 
-  try {
-    // Parse synced lyrics to extract text lines
-    const lines = syncedLyrics.split('\n');
-    const textLines: string[] = [];
+  // Still the newest job?
+  const isCurrent = () =>
+    generation === translationGeneration &&
+    currentTrackKey === trackKey &&
+    translationTargetLang === targetLang &&
+    translationEnabled;
 
-    for (const line of lines) {
-      const match = line.match(/^\[\d{2}:\d{2}\.\d{2}\](.*)$/);
-      if (match && match[1] !== undefined) {
-        textLines.push(match[1].trim());
+  const job = (async () => {
+    try {
+      // Parse with the shared parser so translation indices line up 1:1 with
+      // the lines the renderer displays
+      const textLines = parseLRC(syncedLyrics).map((line) => line.text);
+
+      if (!textLines.length) return;
+
+      sendTranslationStatus(true);
+
+      const result = await translationManager.translateBatch(
+        textLines,
+        targetLang,
+        trackKey,
+      );
+
+      if (!isCurrent()) {
+        Logger.lyrics.debug('Translation discarded: superseded by a newer job');
+        return;
       }
-    }
 
-    if (!textLines.length) {
-      translationInProgress = false;
-      return;
-    }
-
-    // Translate batch
-    const result = await translationManager.translateBatch(
-      textLines,
-      targetLang,
-      trackKey,
-    );
-
-    // Verify settings haven't changed during translation
-    if (result && mainWindow && !mainWindow.isDestroyed()) {
-      // Check if track or language changed while translating
-      if (
-        currentTrackKey === trackKey &&
-        translationTargetLang === targetLang &&
-        translationEnabled
-      ) {
+      if (result && mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('translation:update', {
           translations: result.translated,
           targetLang: result.targetLang,
@@ -724,17 +784,18 @@ async function translateLyricsAsync(
         Logger.lyrics.debug(
           `Translation sent: ${textLines.length} lines → ${targetLang}`,
         );
-      } else {
-        Logger.lyrics.debug(
-          'Translation discarded: settings changed during fetch',
-        );
+      }
+    } catch (error) {
+      Logger.lyrics.error('Translation failed', error as Error);
+    } finally {
+      // Only the newest job owns the indicator
+      if (generation === translationGeneration) {
+        sendTranslationStatus(false);
       }
     }
-  } catch (error) {
-    Logger.lyrics.error('Translation failed', error as Error);
-  } finally {
-    translationInProgress = false;
-  }
+  })();
+
+  await job;
 }
 
 async function broadcastMusicUpdate(
@@ -811,9 +872,6 @@ async function broadcastMusicUpdate(
             }
           },
         );
-      } else {
-        // Same track - update position smoothly
-        updateInternalPosition(trackData.position, trackData.isPlaying);
       }
 
       handleWindowVisibility(trackData.isPlaying);
@@ -961,16 +1019,16 @@ function updateTrayMenu(): void {
       label: 'Settings',
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
-          // Temporarily enable window to show settings
-          const wasDisabled = !windowEnabled;
-          if (wasDisabled) {
-            windowEnabled = true;
+          // Settings live inside the window, so the window has to stay enabled.
+          // Flipping the flag back would let the next poll hide it again.
+          if (!windowEnabled) {
+            saveWindowEnabledSetting(true);
           }
+          // Hold the window open while the user is in settings
+          manualOverride = true;
           showWindow(true); // User action: show and focus
           mainWindow.webContents.send('open-settings');
-          if (wasDisabled) {
-            windowEnabled = false; // Restore state but keep window visible for settings
-          }
+          updateTrayMenu();
         }
       },
     },
@@ -1033,10 +1091,6 @@ function createWindow(): void {
   const windowHeight = 600;
   const padding = 20;
 
-  app.commandLine.appendSwitch('enable-gpu-rasterization');
-  app.commandLine.appendSwitch('enable-zero-copy');
-  app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds');
-
   mainWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -1055,7 +1109,9 @@ function createWindow(): void {
     skipTaskbar: true,
     focusable: true,
     hasShadow: true,
-    show: true,
+    // Kept hidden until the first paint, otherwise the transparent window
+    // shows up as an empty pane of glass while the renderer boots
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -1070,6 +1126,13 @@ function createWindow(): void {
   Logger.app.debug(
     `Window positioned at: x=${width - windowWidth - padding}, y=${padding}`,
   );
+
+  mainWindow.once('ready-to-show', () => {
+    // Auto-hide mode waits for playback to decide; everyone else sees it now
+    if (windowEnabled && !autoHideEnabled) {
+      showWindow();
+    }
+  });
 
   mainWindow.on('close', (event) => {
     if (!isAppQuitting) {
@@ -1117,7 +1180,10 @@ app.whenReady().then(async () => {
   Logger.app.info('App ready, initializing...');
 
   // Initialize settings store and load settings
-  await getSettingsStore();
+  await loadSettings();
+
+  // Token store loads asynchronously - wait for it before any isLoggedIn check
+  await spotifyAuth.whenReady();
   Logger.app.info(`Window: ${windowEnabled ? 'enabled' : 'disabled'}`);
   Logger.app.info(
     `Auto-hide mode: ${autoHideEnabled ? 'enabled' : 'disabled'}`,
@@ -1135,6 +1201,26 @@ app.whenReady().then(async () => {
   } else {
     Logger.app.warn('Failed to register global hotkey');
   }
+
+  // Serve cached artwork straight from disk
+  protocol.handle(CACHE_SCHEME, async (request) => {
+    try {
+      const url = new URL(request.url);
+      const filePath = unifiedCache.resolveCacheFile(
+        url.hostname,
+        path.basename(url.pathname),
+      );
+
+      if (!filePath) {
+        return new Response('Not found', { status: 404 });
+      }
+
+      return await net.fetch(pathToFileURL(filePath).toString());
+    } catch (error) {
+      Logger.cache.error('Cache protocol request failed', error as Error);
+      return new Response('Not found', { status: 404 });
+    }
+  });
 
   createTray();
   createWindow();
@@ -1163,9 +1249,23 @@ ipcMain.on('tray:update-lyrics', (_event, text: string) => {
 });
 
 ipcMain.on('open:external', (_event, url: string) => {
-  if (url && typeof url === 'string') {
-    shell.openExternal(url);
+  if (!url || typeof url !== 'string') return;
+
+  // Only ever hand plain web links to the OS - never file://, custom app
+  // schemes or anything else the renderer might be tricked into sending
+  // Web links plus spotify: deep links (used by the top tracks list)
+  try {
+    const scheme = new URL(url).protocol;
+    if (!EXTERNAL_URL_SCHEMES.includes(scheme)) {
+      Logger.app.warn(`Blocked external URL with scheme: ${scheme}`);
+      return;
+    }
+  } catch {
+    Logger.app.warn('Blocked malformed external URL');
+    return;
   }
+
+  shell.openExternal(url);
 });
 
 // Window close IPC handler (hide window, don't quit)
@@ -1202,6 +1302,22 @@ function executeMediaControl(
       Logger.music.error(`Media control failed: ${command}`, error);
     }
   });
+
+  schedulePromptPoll();
+}
+
+/**
+ * Poll once, straight away, after the app itself changed playback.
+ * Keeps buttons and the progress bar reacting instantly even though the steady
+ * state cadence is nearly two seconds.
+ */
+function schedulePromptPoll(): void {
+  if (promptPollTimeout) clearTimeout(promptPollTimeout);
+
+  promptPollTimeout = setTimeout(() => {
+    promptPollTimeout = null;
+    pollMusicState();
+  }, PROMPT_POLL_DELAY);
 }
 
 ipcMain.on('music:seek', (_event, position: number) => {
@@ -1290,18 +1406,8 @@ ipcMain.handle('cache:clear-all', async () => {
   return true;
 });
 
-let visibilityStore: Store | null = null;
-
-async function getVisibilityStore(): Promise<Store> {
-  if (!visibilityStore) {
-    const StoreModule = await import('electron-store');
-    visibilityStore = new StoreModule.default();
-  }
-  return visibilityStore;
-}
-
 ipcMain.handle('visibility:get', async (_event, key?: string) => {
-  const store = await getVisibilityStore();
+  const store = await getStore();
   const defaults = {
     player: true,
     lyrics: true,
@@ -1310,7 +1416,6 @@ ipcMain.handle('visibility:get', async (_event, key?: string) => {
     bio: true,
     tracks: true,
     albums: true,
-    similar: true,
   };
 
   if (key) {
@@ -1325,14 +1430,14 @@ ipcMain.handle('visibility:get', async (_event, key?: string) => {
 ipcMain.handle(
   'visibility:set',
   async (_event, key: string, value: boolean) => {
-    const store = await getVisibilityStore();
+    const store = await getStore();
     store.set(`visibility.${key}`, value);
     return true;
   },
 );
 
 ipcMain.handle('visibility:reset', async () => {
-  const store = await getVisibilityStore();
+  const store = await getStore();
   store.delete('visibility');
   return true;
 });
@@ -1392,8 +1497,10 @@ ipcMain.handle('translation:get-languages', () => {
 // Refresh translations with current lyrics and new settings
 ipcMain.handle('translation:refresh', async () => {
   if (!translationEnabled) {
-    // Translation disabled - send complete clear payload to UI
-    translationInProgress = false; // Reset flag to allow future translations
+    // Translation disabled - retire any running job and clear the UI
+    translationGeneration++;
+    sendTranslationStatus(false);
+
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('translation:update', {
         translations: [],
@@ -1409,13 +1516,8 @@ ipcMain.handle('translation:refresh', async () => {
     return false;
   }
 
-  // Wait for any in-progress translation to complete before starting new one
-  // This ensures language changes take effect
-  while (translationInProgress) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-
-  // Re-translate with new settings
+  // Starting a new job supersedes any running one, so there is nothing to wait
+  // for: awaiting this promise resolves when the newest translation is done
   await translateLyricsAsync(currentSyncedLyrics, currentTrackKey);
   return true;
 });
@@ -1448,6 +1550,7 @@ app.on('before-quit', () => {
   isAppQuitting = true;
   globalShortcut.unregisterAll();
   if (hideTimeout) clearTimeout(hideTimeout);
+  if (promptPollTimeout) clearTimeout(promptPollTimeout);
   if (pollInterval) {
     clearInterval(pollInterval);
   }

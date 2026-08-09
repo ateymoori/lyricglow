@@ -3,21 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: lyricglow-cache:; connect-src 'self' lyricglow-cache:">
   <title>Now Playing</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <!-- SVG Gradient Definitions -->
-  <svg style="position: absolute; width: 0; height: 0;">
-    <defs>
-      <linearGradient id="vinyl-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%" style="stop-color: var(--color-primary)" />
-        <stop offset="100%" style="stop-color: var(--color-secondary)" />
-      </linearGradient>
-    </defs>
-  </svg>
-
   <div class="player-widget">
     <div class="header-buttons">
       <button class="icon-btn icon-btn-sm btn-settings" id="settingsBtn" title="Settings">⚙</button>
@@ -32,19 +22,6 @@
             <img class="album-art" id="albumArt" alt="">
           </div>
         </div>
-        <!-- Progress arc - expands from center outward like gramophone -->
-        <svg class="vinyl-progress" viewBox="0 0 100 100">
-          <defs>
-            <mask id="progressMask">
-              <circle cx="50" cy="50" r="50" fill="white" />
-              <circle cx="50" cy="50" r="24" fill="black" />
-            </mask>
-          </defs>
-          <!-- Background track -->
-          <circle class="vinyl-progress-bg" cx="50" cy="50" r="37" />
-          <!-- Progress arc that grows from center -->
-          <path class="vinyl-progress-fill" id="vinylProgressFill" d="" />
-        </svg>
       </div>
 
       <div class="track-info">
@@ -115,6 +92,21 @@
       </div>
       <div class="lyrics-line lyrics-next" id="lyricsNext"></div>
       <div class="lyrics-translation lyrics-translation-next" id="lyricsNextTranslation"></div>
+      <div class="translating-indicator" id="translatingIndicator" aria-live="polite">Translating…</div>
+    </div>
+
+    <!-- Automation permission explainer (shown when macOS blocks AppleScript) -->
+    <div class="permission-notice" id="permissionNotice">
+      <div class="permission-title">Automation access needed</div>
+      <p class="permission-text">
+        LyricGlow reads the current track from Spotify and Music. macOS needs you to allow that once.
+      </p>
+      <ol class="permission-steps">
+        <li>Open <strong>System Settings → Privacy &amp; Security → Automation</strong></li>
+        <li>Find <strong>LyricGlow</strong> in the list</li>
+        <li>Turn on <strong>Spotify</strong> and <strong>Music</strong></li>
+      </ol>
+      <button class="btn-primary" id="permissionOpenSettings">Open Automation Settings</button>
     </div>
 
     <div class="metadata-container" id="metadataContainer">
@@ -140,13 +132,8 @@
         </div>
 
         <div class="metadata-stats" id="metadataStats">
-          <span class="stat-item" id="artistListeners"></span>
-          <span class="stat-item" id="artistPlaycount"></span>
-          <span class="stat-item" id="trackPlaycount"></span>
           <a class="stat-item" id="artistProfile" target="_blank"></a>
         </div>
-
-        <div class="metadata-tags" id="metadataTags"></div>
       </div>
 
       <div class="metadata-bio" id="metadataBio" data-section="bio">
@@ -164,10 +151,6 @@
         <div class="top-albums-grid" id="topAlbumsGrid"></div>
       </div>
 
-      <div class="metadata-similar" id="metadataSimilar" data-section="similar">
-        <span class="similar-label">Similar artists:</span>
-        <div class="similar-artists" id="similarArtists"></div>
-      </div>
     </div>
   </div>
 
@@ -367,14 +350,6 @@
                 <span class="setting-label">Top Albums</span>
               </div>
             </label>
-
-            <label class="setting-row">
-              <input type="checkbox" id="visibility-similar" checked>
-              <span class="checkbox-custom"></span>
-              <div class="setting-content">
-                <span class="setting-label">Similar Artists</span>
-              </div>
-            </label>
           </div>
         </div>
 
@@ -408,8 +383,26 @@
       <div class="full-lyrics-body" id="fullLyricsBody">
         <div class="full-lyrics-text" id="fullLyricsText"></div>
       </div>
+      <button class="resume-scroll-pill" id="resumeScrollBtn" title="Follow the current line again">
+        Resume auto-scroll
+      </button>
     </div>
   </div>
+
+  <!-- In-app dialog: replaces native alert()/confirm() -->
+  <div class="app-dialog-backdrop" id="appDialog">
+    <div class="app-dialog" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle">
+      <div class="app-dialog-title" id="appDialogTitle"></div>
+      <div class="app-dialog-message" id="appDialogMessage"></div>
+      <div class="app-dialog-actions">
+        <button class="btn-secondary" id="appDialogCancel">Cancel</button>
+        <button class="btn-primary" id="appDialogConfirm">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transient status messages -->
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
   <script type="module" src="/src/renderer/index.ts"></script>
 </body>

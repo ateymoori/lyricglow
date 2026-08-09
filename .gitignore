@@ -18,10 +18,8 @@ build/icon.svg.png
 *.log
 logs/
 
-# Documentation (only README allowed)
-docs/
-*.md
-!README.md
+# Documentation is tracked (README, CHANGELOG, docs/).
+# Personal/AI scratch notes are ignored individually further down.
 
 # macOS
 .DS_Store

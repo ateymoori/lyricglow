@@ -118,21 +118,31 @@ interface TrackDataInput {
   artist?: string;
 }
 
+const PREMIUM_PAUSE_MS = 30 * 60 * 1000;
+
 class SpotifyMetadataManager {
   private auth: SpotifyAuth;
   private cache: UnifiedCacheManager;
   private baseUrl: string;
+  private apiPausedUntil: number;
+  private premiumWarned: boolean;
 
   constructor(spotifyAuth: SpotifyAuth, cache: UnifiedCacheManager) {
     this.auth = spotifyAuth;
     this.cache = cache;
     this.baseUrl = 'api.spotify.com';
+    this.apiPausedUntil = 0;
+    this.premiumWarned = false;
   }
 
   async makeRequest(
     endpoint: string,
     timeoutMs: number = 10000,
   ): Promise<unknown> {
+    if (Date.now() < this.apiPausedUntil) {
+      return null;
+    }
+
     const accessToken = await this.auth.getAccessToken();
 
     if (!accessToken) {
@@ -160,6 +170,27 @@ class SpotifyMetadataManager {
         });
 
         res.on('end', () => {
+          const status = res.statusCode ?? 0;
+          const snippet = data.slice(0, 120).replace(/\s+/g, ' ');
+
+          if (status < 200 || status >= 300) {
+            if (status === 403 && data.includes('premium subscription')) {
+              this.apiPausedUntil = Date.now() + PREMIUM_PAUSE_MS;
+              if (!this.premiumWarned) {
+                this.premiumWarned = true;
+                Logger.metadata.warn(
+                  'Spotify Web API blocked: the app owner needs an active Spotify Premium subscription. Pausing Spotify metadata requests for 30 minutes.',
+                );
+              }
+            } else {
+              Logger.metadata.warn(
+                `Spotify API HTTP ${status} on ${endpoint}: ${snippet}`,
+              );
+            }
+            resolve(null);
+            return;
+          }
+
           try {
             const json = JSON.parse(data);
 
@@ -169,8 +200,10 @@ class SpotifyMetadataManager {
             } else {
               resolve(json);
             }
-          } catch (error) {
-            Logger.metadata.error('JSON parse failed', error as Error);
+          } catch {
+            Logger.metadata.warn(
+              `Spotify API non-JSON response on ${endpoint}: ${snippet}`,
+            );
             resolve(null);
           }
         });
@@ -229,7 +262,7 @@ class SpotifyMetadataManager {
       this.cache.set('metadata', cacheKey, response);
     }
 
-    const offlineCache = await this.cache.get('metadata', cacheKey);
+    const offlineCache = await this.cache.getStale('metadata', cacheKey);
     return (
       (response as SpotifyTrackRaw) || (offlineCache as SpotifyTrackRaw | null)
     );
@@ -259,7 +292,7 @@ class SpotifyMetadataManager {
     Logger.metadata.warn(
       `Spotify not found (${duration}ms): artist ${artistId}`,
     );
-    const offlineCache = await this.cache.get('metadata', cacheKey);
+    const offlineCache = await this.cache.getStale('metadata', cacheKey);
     return offlineCache as ArtistData | null;
   }
 
@@ -308,7 +341,7 @@ class SpotifyMetadataManager {
       return tracks;
     }
 
-    const offlineCache = await this.cache.get('metadata', cacheKey);
+    const offlineCache = await this.cache.getStale('metadata', cacheKey);
     return (offlineCache as TrackData[]) || [];
   }
 
@@ -343,7 +376,7 @@ class SpotifyMetadataManager {
       return albums;
     }
 
-    const offlineCache = await this.cache.get('metadata', cacheKey);
+    const offlineCache = await this.cache.getStale('metadata', cacheKey);
     return (offlineCache as AlbumData[]) || [];
   }
 
@@ -372,7 +405,7 @@ class SpotifyMetadataManager {
       }
     }
 
-    const offlineCache = await this.cache.get('metadata', cacheKey);
+    const offlineCache = await this.cache.getStale('metadata', cacheKey);
     return offlineCache as ArtistData | null;
   }
 

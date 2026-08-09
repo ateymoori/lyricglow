@@ -68,6 +68,7 @@ interface MusicAPI {
 
   // Translation
   onTranslationUpdate: (callback: (payload: IpcPayload) => void) => void;
+  onTranslationStatus: (callback: (payload: IpcPayload) => void) => void;
   translationGetEnabled: () => Promise<boolean>;
   translationSetEnabled: (enabled: boolean) => Promise<boolean>;
   translationGetTargetLang: () => Promise<string>;
@@ -218,6 +219,12 @@ const musicAPI: MusicAPI = {
   onTranslationUpdate: (callback: (payload: IpcPayload) => void) => {
     ipcRenderer.on(
       'translation:update',
+      (_event: IpcRendererEvent, payload: IpcPayload) => callback(payload),
+    );
+  },
+  onTranslationStatus: (callback: (payload: IpcPayload) => void) => {
+    ipcRenderer.on(
+      'translation:status',
       (_event: IpcRendererEvent, payload: IpcPayload) => callback(payload),
     );
   },

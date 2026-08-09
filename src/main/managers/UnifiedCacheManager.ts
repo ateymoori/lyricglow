@@ -11,6 +11,21 @@ import https from 'node:https';
 import path from 'node:path';
 import Logger from '../../shared/utils/Logger';
 
+// How long a connectivity probe result stays valid
+const ONLINE_STATUS_TTL = 60 * 1000;
+
+// Custom scheme used to serve cached files to the renderer straight from disk
+export const CACHE_SCHEME = 'lyricglow-cache';
+
+// Cache file names are hex hashes - anything else is rejected by the handler
+const CACHE_FILE_NAME = /^[a-f0-9]{32}\.(jpg|json)$/;
+
+const CACHE_TYPES = ['images', 'lyrics', 'metadata', 'translations'];
+
+// Connectivity is judged by the lyrics API, the one service the app cannot
+// work without - reaching it means "online" in any sense that matters here
+const PROBE_HOST = 'lrclib.net';
+
 interface CacheConfig {
   CACHE_DURATION_HOURS?: number;
 }
@@ -48,6 +63,8 @@ class UnifiedCacheManager {
   private cacheExpiry: number;
   private index: CacheIndex = {};
   private onlineStatus: boolean | null = null;
+  private onlineCheckedAt = 0;
+  private onlineCheckInFlight: Promise<boolean> | null = null;
   private initPromise: Promise<void>;
 
   constructor(config: CacheConfig = {}, cachePath: string | null = null) {
@@ -69,10 +86,7 @@ class UnifiedCacheManager {
   private async ensureCacheDirectoriesAsync(): Promise<void> {
     const dirs = [
       this.cacheRoot,
-      path.join(this.cacheRoot, 'images'),
-      path.join(this.cacheRoot, 'lyrics'),
-      path.join(this.cacheRoot, 'metadata'),
-      path.join(this.cacheRoot, 'translations'),
+      ...CACHE_TYPES.map((type) => path.join(this.cacheRoot, type)),
     ];
     await Promise.all(
       dirs.map((dir) =>
@@ -116,37 +130,51 @@ class UnifiedCacheManager {
   }
 
   private async isOnline(): Promise<boolean> {
-    if (this.onlineStatus !== null) {
-      return this.onlineStatus;
+    // Re-check periodically: an app started offline must notice when the
+    // network comes back, otherwise it serves stale cache forever
+    const isFresh =
+      this.onlineStatus !== null &&
+      Date.now() - this.onlineCheckedAt < ONLINE_STATUS_TTL;
+
+    if (isFresh) {
+      return this.onlineStatus as boolean;
     }
 
-    return new Promise((resolve) => {
+    // Collapse concurrent checks into one probe
+    if (this.onlineCheckInFlight) {
+      return this.onlineCheckInFlight;
+    }
+
+    this.onlineCheckInFlight = new Promise<boolean>((resolve) => {
+      const settle = (online: boolean) => {
+        this.onlineStatus = online;
+        this.onlineCheckedAt = Date.now();
+        this.onlineCheckInFlight = null;
+        resolve(online);
+      };
+
+      // Probe an API host the app actually depends on, not a third party
       const req = https.request(
         {
-          hostname: 'www.google.com',
+          hostname: PROBE_HOST,
           path: '/',
           method: 'HEAD',
           timeout: 3000,
         },
-        () => {
-          this.onlineStatus = true;
-          resolve(true);
-        },
+        () => settle(true),
       );
 
-      req.on('error', () => {
-        this.onlineStatus = false;
-        resolve(false);
-      });
+      req.on('error', () => settle(false));
 
       req.on('timeout', () => {
         req.destroy();
-        this.onlineStatus = false;
-        resolve(false);
+        settle(false);
       });
 
       req.end();
     });
+
+    return this.onlineCheckInFlight;
   }
 
   private shouldRefresh(timestamp: number, isOnline: boolean): boolean {
@@ -162,7 +190,75 @@ class UnifiedCacheManager {
     return !!this.index[type]?.[hash];
   }
 
+  /**
+   * Read a fresh cache entry (expired entries are treated as a miss)
+   */
   async get(type: string, key: string): Promise<unknown> {
+    return this.read(type, key, false);
+  }
+
+  /**
+   * Read an entry even if it has expired.
+   *
+   * Used as the offline/API-failure fallback: a stale answer beats no answer.
+   * Calling get() again would just repeat the same expiry check and return null.
+   */
+  async getStale(type: string, key: string): Promise<unknown> {
+    return this.read(type, key, true);
+  }
+
+  /**
+   * URL for a cached entry, served from disk by the custom protocol handler.
+   *
+   * Returns null when the entry is missing (or expired, unless allowExpired).
+   * Used for images so bytes never travel through IPC.
+   */
+  async getFileUrl(
+    type: string,
+    key: string,
+    allowExpired = false,
+  ): Promise<string | null> {
+    await this.initPromise;
+
+    const hash = this.generateHash(key);
+    const entry = this.index[type]?.[hash];
+    if (!entry) return null;
+
+    const filePath = this.getCacheFilePath(type, key);
+
+    try {
+      await fs.promises.access(filePath);
+    } catch {
+      delete this.index[type]?.[hash];
+      this.saveIndex();
+      return null;
+    }
+
+    if (!allowExpired) {
+      const isOnline = await this.isOnline();
+      if (this.shouldRefresh(entry.timestamp, isOnline)) return null;
+    }
+
+    // Cache-bust on the stored timestamp so a refreshed file is picked up
+    return `${CACHE_SCHEME}://${type}/${path.basename(filePath)}?v=${entry.timestamp}`;
+  }
+
+  /**
+   * Map a custom-scheme URL back to a file inside the cache directory.
+   * Rejects anything that is not a known cache type + hashed file name.
+   */
+  resolveCacheFile(type: string, fileName: string): string | null {
+    if (!CACHE_TYPES.includes(type)) return null;
+    if (!CACHE_FILE_NAME.test(fileName)) return null;
+
+    return path.join(this.cacheRoot, type, fileName);
+  }
+
+  private async read(
+    type: string,
+    key: string,
+    allowExpired: boolean,
+  ): Promise<unknown> {
     await this.initPromise;
     if (!this.index[type]) return null;
 
@@ -181,10 +277,12 @@ class UnifiedCacheManager {
       return null;
     }
 
-    const isOnline = await this.isOnline();
+    if (!allowExpired) {
+      const isOnline = await this.isOnline();
 
-    if (this.shouldRefresh(entry.timestamp, isOnline)) {
-      return null;
+      if (this.shouldRefresh(entry.timestamp, isOnline)) {
+        return null;
+      }
     }
 
     try {

@@ -5,8 +5,10 @@
  * Handles music display, lyrics synchronization, metadata, and settings.
  */
 
+import { getLanguageName } from '../shared/constants/languages';
+import { type LyricLine, parseLRC } from '../shared/utils/LrcParser';
+
 // Type definitions
-export {}; // Make this file a module
 interface MusicData {
   title: string;
   artist: string;
@@ -33,11 +35,6 @@ interface LyricsData {
   synced: string | null;
   plain: string | null;
   instrumental: boolean;
-}
-
-interface LyricLine {
-  time: number;
-  text: string;
 }
 
 interface SyncData {
@@ -78,25 +75,16 @@ interface MetadataArtist {
   website?: string;
   facebook?: string;
   twitter?: string;
-  listeners?: string;
-  playcount?: string;
-  tags?: string[];
   bio?: {
     summary: string;
     content: string;
   };
-  similar?: Array<{ name: string; url: string }>;
   url?: string;
   allImages?: string[];
 }
 
-interface MetadataTrack {
-  playcount?: string;
-}
-
 interface Metadata {
   artist: MetadataArtist;
-  track?: MetadataTrack;
   topTracks?: Array<{
     name: string;
     playcount: string | number;
@@ -159,6 +147,9 @@ declare global {
       logsClear: () => Promise<boolean>;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onTranslationUpdate: (callback: (payload: any) => void) => void;
+      onTranslationStatus: (
+        callback: (payload: { pending: boolean } | null) => void,
+      ) => void;
       translationGetEnabled: () => Promise<boolean>;
       translationSetEnabled: (enabled: boolean) => Promise<boolean>;
       translationGetTargetLang: () => Promise<string>;
@@ -191,10 +182,146 @@ const elements = {
   // Vinyl disc elements
   vinylPlayer: document.getElementById('vinylPlayer') as HTMLElement,
   vinylDisc: document.getElementById('vinylDisc') as HTMLElement,
-  vinylProgressFill: document.getElementById(
-    'vinylProgressFill',
-  ) as unknown as SVGPathElement,
 };
+
+// Honour the system setting for animation-heavy behaviour driven from JS
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+// Fade-out half of the lyric line swap - keep in step with --duration-swap
+const SWAP_DURATION = 80;
+
+// How long a toast stays on screen
+const TOAST_DURATION = 2600;
+
+// macOS deep link straight to the Automation privacy pane
+const AUTOMATION_SETTINGS_URL =
+  'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation';
+
+// Remembers that the permission explainer has already been shown once
+const PERMISSION_HINT_KEY = 'lyricglow.permissionHintShown';
+
+// Keys that scroll a list, and so count as the user taking over
+const SCROLL_KEYS = [
+  'ArrowUp',
+  'ArrowDown',
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+  ' ',
+];
+
+/**
+ * Transient message in the corner of the window.
+ * Replaces the native alert() for things that need no answer.
+ */
+function showToast(message: string, variant: 'info' | 'error' = 'info'): void {
+  const stack = document.getElementById('toastStack');
+  if (!stack) return;
+
+  const toast = document.createElement('div');
+  toast.className = variant === 'error' ? 'toast error' : 'toast';
+  toast.textContent = message;
+  stack.appendChild(toast);
+
+  // Next frame, so the entry transition actually runs
+  requestAnimationFrame(() => toast.classList.add('show'));
+
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 250);
+  }, TOAST_DURATION);
+}
+
+/**
+ * In-app replacement for alert()/confirm().
+ *
+ * The native dialogs are Chromium chrome: they ignore the app's design, block
+ * the whole renderer, and look wrong on a transparent glass window.
+ */
+function openDialog(options: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  showCancel: boolean;
+}): Promise<boolean> {
+  const backdrop = document.getElementById('appDialog');
+  const titleEl = document.getElementById('appDialogTitle');
+  const messageEl = document.getElementById('appDialogMessage');
+  const confirmBtn = document.getElementById('appDialogConfirm');
+  const cancelBtn = document.getElementById('appDialogCancel');
+
+  if (!backdrop || !titleEl || !messageEl || !confirmBtn || !cancelBtn) {
+    return Promise.resolve(false);
+  }
+
+  titleEl.textContent = options.title;
+  messageEl.textContent = options.message;
+  confirmBtn.textContent = options.confirmLabel || 'OK';
+  cancelBtn.textContent = options.cancelLabel || 'Cancel';
+  cancelBtn.classList.toggle('hidden', !options.showCancel);
+  backdrop.classList.add('show');
+
+  return new Promise<boolean>((resolve) => {
+    const close = (result: boolean) => {
+      backdrop.classList.remove('show');
+      confirmBtn.removeEventListener('click', onConfirm);
+      cancelBtn.removeEventListener('click', onCancel);
+      backdrop.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    };
+
+    const onConfirm = () => close(true);
+    const onCancel = () => close(false);
+    const onBackdrop = (e: MouseEvent) => {
+      if (e.target === backdrop) close(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close(false);
+      if (e.key === 'Enter') close(true);
+    };
+
+    confirmBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+    backdrop.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+
+    (confirmBtn as HTMLButtonElement).focus();
+  });
+}
+
+function showAlert(title: string, message: string): Promise<boolean> {
+  return openDialog({ title, message, showCancel: false });
+}
+
+function showConfirm(
+  title: string,
+  message: string,
+  confirmLabel = 'Confirm',
+): Promise<boolean> {
+  return openDialog({ title, message, confirmLabel, showCancel: true });
+}
+
+/**
+ * Seek playback to a position and reflect it locally right away, so a click
+ * feels instant instead of waiting for the next poll to come back.
+ */
+function seekTo(seconds: number): void {
+  const position = Math.max(0, seconds);
+
+  window.musicAPI.seek(position);
+
+  internalPosition = position;
+  lastSyncTime = Date.now();
+  lyricsSyncManager.updatePosition(position);
+
+  if (currentMusicData?.duration) {
+    setProgressBar((position / currentMusicData.duration) * 100, true);
+  }
+  elements.currentTime.textContent = formatTime(position);
+}
 
 // Progress bar seeking functionality
 let isDragging = false;
@@ -214,7 +341,7 @@ function updateSeekUI(e: MouseEvent): void {
   internalPosition = newPosition;
   lastSyncTime = Date.now();
 
-  elements.progressBar.style.width = `${percentage * 100}%`;
+  setProgressBar(percentage * 100, true);
   elements.currentTime.textContent = formatTime(newPosition);
 }
 
@@ -273,62 +400,17 @@ function updatePlayPauseButton(isPlaying: boolean): void {
 }
 
 /**
- * VinylDiscController: Manages the vinyl disc animation and progress
+ * VinylDiscController: shows/hides the disc and tracks playback state.
  *
- * Features:
- * - Rotation animation synced to playback state
- * - Radial progress arc (expands from center like gramophone)
- * - Smooth transitions
+ * The radial progress arc this class used to redraw every frame was invisible
+ * (.vinyl-progress is display:none), so that path is gone: it cost a string
+ * build and an SVG attribute write 60 times a second and painted nothing.
  */
 class VinylDiscController {
   private isPlaying: boolean;
-  private readonly centerX = 50;
-  private readonly centerY = 50;
-  private readonly innerRadius = 24; // Start from center (near album art)
-  private readonly outerRadius = 48; // Expand to edge
 
   constructor() {
     this.isPlaying = false;
-  }
-
-  /**
-   * Create SVG arc path for radial progress
-   * Progress expands from inner radius to outer radius
-   */
-  private createArcPath(progress: number): string {
-    if (progress <= 0) return '';
-
-    const clampedProgress = Math.max(0, Math.min(1, progress));
-
-    // Calculate the current radius based on progress
-    const currentRadius =
-      this.innerRadius +
-      (this.outerRadius - this.innerRadius) * clampedProgress;
-
-    // Full circle arc from inner to current radius
-    // We draw a donut/ring shape
-    const innerR = this.innerRadius;
-    const outerR = currentRadius;
-
-    // Create a full ring (donut) path
-    return `
-      M ${this.centerX} ${this.centerY - outerR}
-      A ${outerR} ${outerR} 0 1 1 ${this.centerX - 0.001} ${this.centerY - outerR}
-      L ${this.centerX - 0.001} ${this.centerY - innerR}
-      A ${innerR} ${innerR} 0 1 0 ${this.centerX} ${this.centerY - innerR}
-      Z
-    `;
-  }
-
-  /**
-   * Update the radial progress based on playback position
-   * @param progress - Value from 0 to 1
-   */
-  updateProgress(progress: number): void {
-    if (!elements.vinylProgressFill) return;
-
-    const path = this.createArcPath(progress);
-    elements.vinylProgressFill.setAttribute('d', path);
   }
 
   /**
@@ -363,15 +445,6 @@ class VinylDiscController {
     if (elements.vinylPlayer) {
       elements.vinylPlayer.classList.remove('show');
     }
-    this.setPlaying(false);
-    this.updateProgress(0);
-  }
-
-  /**
-   * Reset to initial state
-   */
-  reset(): void {
-    this.updateProgress(0);
     this.setPlaying(false);
   }
 }
@@ -426,34 +499,6 @@ class LyricsSyncManager {
   }
 
   /**
-   * Parse LRC format into structured lyrics array
-   * Format: [MM:SS.CS]Text
-   */
-  parseLRC(content: string): LyricLine[] {
-    if (!content) return [];
-
-    const lines = content.split('\n');
-    const lyrics: LyricLine[] = [];
-
-    for (const line of lines) {
-      const match = line.match(/^\[(\d{2}):(\d{2})\.(\d{2})\](.*)$/);
-      if (match?.[1] && match[2] && match[3] && match[4] !== undefined) {
-        const minutes = match[1];
-        const seconds = match[2];
-        const centiseconds = match[3];
-        const text = match[4];
-        const time =
-          parseInt(minutes, 10) * 60 +
-          parseInt(seconds, 10) +
-          parseInt(centiseconds, 10) / 100;
-        lyrics.push({ time, text: text.trim() });
-      }
-    }
-
-    return lyrics.sort((a, b) => a.time - b.time);
-  }
-
-  /**
    * Set lyrics from IPC event (single entry point)
    */
   setLyrics(lyricsData: LyricsData | null): void {
@@ -473,8 +518,9 @@ class LyricsSyncManager {
       return;
     }
 
-    // Parse and store lyrics
-    this.lyrics = this.parseLRC(lyricsData.synced);
+    // Parse and store lyrics (shared parser keeps indices aligned with the
+    // menu bar sync loop and the translation list)
+    this.lyrics = parseLRC(lyricsData.synced);
     this.currentIndex = 0;
     this.state = 'ready';
 
@@ -675,6 +721,7 @@ class LyricsMainDisplay {
   lastGlowUpdate: number;
   glowUpdateInterval: number;
   currentSyncData: SyncData | null;
+  private swapTimer: number | null = null;
 
   constructor() {
     this.container = null;
@@ -709,14 +756,60 @@ class LyricsMainDisplay {
       currentTranslation: document.getElementById('lyricsCurrentTranslation'),
       nextTranslation: document.getElementById('lyricsNextTranslation'),
     };
+
+    // Clicking the line above or below jumps there
+    this.elements.previous?.addEventListener('click', () => {
+      this.seekToLine(this.currentSyncData?.prevLine ?? null);
+    });
+
+    this.elements.next?.addEventListener('click', () => {
+      this.seekToLine(this.currentSyncData?.nextLine ?? null);
+    });
   }
 
   /**
-   * Render 3-line display from sync data (pure function)
-   * Called by LyricsSyncManager when line changes
+   * Jump playback to a neighbouring lyric line
+   */
+  private seekToLine(line: LyricLine | null): void {
+    if (!line || !line.text) return;
+    seekTo(line.time);
+  }
+
+  /**
+   * Render 3-line display from sync data
+   *
+   * The swap runs in two phases - the old lines fade and lift, the text is
+   * replaced, the new lines settle back - because text content itself cannot
+   * be transitioned. Only opacity and transform move, so it stays on the
+   * compositor and the line never reflows.
    */
   render(syncData: SyncData): void {
+    const isFirstLine = this.currentSyncData === null;
     this.currentSyncData = syncData;
+
+    if (isFirstLine || reducedMotion.matches || !this.container) {
+      this.applyLines();
+      return;
+    }
+
+    this.container.classList.add('is-swapping');
+
+    // A faster line arriving mid-swap replaces the pending one
+    if (this.swapTimer !== null) clearTimeout(this.swapTimer);
+
+    this.swapTimer = window.setTimeout(() => {
+      this.swapTimer = null;
+      this.applyLines();
+      this.container?.classList.remove('is-swapping');
+    }, SWAP_DURATION);
+  }
+
+  /**
+   * Write the current sync data into the DOM (phase two of the swap)
+   */
+  private applyLines(): void {
+    const syncData = this.currentSyncData;
+    if (!syncData) return;
 
     // Update previous and next lines
     if (this.elements.previous) {
@@ -884,6 +977,13 @@ class LyricsMainDisplay {
    * Clear display
    */
   clear(): void {
+    // A pending swap must not repaint the line we are clearing
+    if (this.swapTimer !== null) {
+      clearTimeout(this.swapTimer);
+      this.swapTimer = null;
+    }
+    this.container?.classList.remove('is-swapping');
+
     if (this.elements.previous) this.elements.previous.textContent = '';
     if (this.elements.currentText) this.elements.currentText.innerHTML = '';
     if (this.elements.next) this.elements.next.textContent = '';
@@ -922,6 +1022,9 @@ class FullLyricsModalDisplay {
   };
   isOpen: boolean;
   autoScrollEnabled: boolean;
+  private resumeBtn: HTMLElement | null = null;
+  private lineNodes: HTMLElement[] = [];
+  private highlightedIndex = -1;
 
   constructor(syncManager: LyricsSyncManager) {
     this.syncManager = syncManager;
@@ -960,25 +1063,63 @@ class FullLyricsModalDisplay {
     }
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isOpen) {
+      if (!this.isOpen) return;
+
+      if (e.key === 'Escape') {
         this.hide();
+        return;
+      }
+
+      // Scrolling by keyboard is the user taking over too
+      if (SCROLL_KEYS.includes(e.key)) {
+        this.setAutoScroll(false);
       }
     });
 
-    // Disable auto-scroll on user interaction
+    this.resumeBtn = document.getElementById('resumeScrollBtn');
+    this.resumeBtn?.addEventListener('click', () => {
+      this.setAutoScroll(true);
+      this.scrollToCurrentLine();
+    });
+
+    // Only deliberate scrolling turns auto-scroll off. Listening to 'scroll'
+    // here used to switch it off on the app's own scrollIntoView call, so
+    // auto-scroll died on the very first line change.
     if (this.elements.body) {
-      this.elements.body.addEventListener('scroll', () => {
-        this.autoScrollEnabled = false;
-      });
-
-      this.elements.body.addEventListener('click', () => {
-        this.autoScrollEnabled = false;
-      });
-
       this.elements.body.addEventListener('wheel', () => {
-        this.autoScrollEnabled = false;
+        this.setAutoScroll(false);
+      });
+
+      // Scrollbar drag: a press to the right of the content box
+      this.elements.body.addEventListener('mousedown', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        if (e.offsetX > target.clientWidth) {
+          this.setAutoScroll(false);
+        }
       });
     }
+
+    // Click any line to jump there
+    this.elements.text?.addEventListener('click', (e) => {
+      const line = (e.target as HTMLElement).closest(
+        '.lyrics-line',
+      ) as HTMLElement | null;
+      if (!line?.dataset.time) return;
+
+      const time = Number.parseFloat(line.dataset.time);
+      if (Number.isNaN(time)) return;
+
+      seekTo(time);
+      this.setAutoScroll(true);
+    });
+  }
+
+  /**
+   * Toggle following the current line, and the pill that offers it back
+   */
+  private setAutoScroll(enabled: boolean): void {
+    this.autoScrollEnabled = enabled;
+    this.resumeBtn?.classList.toggle('show', !enabled && this.isOpen);
   }
 
   show(): void {
@@ -989,7 +1130,7 @@ class FullLyricsModalDisplay {
     this.updateLyrics();
     this.modal.style.display = 'flex';
     this.isOpen = true;
-    this.autoScrollEnabled = true;
+    this.setAutoScroll(true);
 
     setTimeout(() => this.scrollToCurrentLine(), 100);
   }
@@ -998,6 +1139,7 @@ class FullLyricsModalDisplay {
     if (!this.modal) return;
     this.modal.style.display = 'none';
     this.isOpen = false;
+    this.resumeBtn?.classList.remove('show');
   }
 
   /**
@@ -1007,7 +1149,7 @@ class FullLyricsModalDisplay {
     if (!this.isOpen) return;
 
     this.updateLyrics();
-    this.autoScrollEnabled = true;
+    this.setAutoScroll(true);
     if (this.elements.body) {
       this.elements.body.scrollTop = 0;
     }
@@ -1055,39 +1197,48 @@ class FullLyricsModalDisplay {
     textEl.innerHTML = '';
     textEl.style.direction = this.syncManager.isRTL ? 'rtl' : 'ltr';
 
+    this.lineNodes = [];
+    this.highlightedIndex = -1;
+
+    const fragment = document.createDocumentFragment();
+
     lyrics.forEach((line, index) => {
       const lineEl = document.createElement('div');
       lineEl.className = 'lyrics-line';
       lineEl.textContent = line.text || ' ';
       lineEl.dataset.index = String(index);
       lineEl.dataset.time = String(line.time);
+      lineEl.title = 'Jump to this line';
 
       if (index === this.syncManager.currentIndex) {
         lineEl.classList.add('current');
+        this.highlightedIndex = index;
       }
 
       if (!line.text || line.text.trim() === '') {
         lineEl.classList.add('empty');
       }
 
-      textEl.appendChild(lineEl);
+      fragment.appendChild(lineEl);
+      this.lineNodes.push(lineEl);
     });
+
+    textEl.appendChild(fragment);
   }
 
   /**
-   * Update current line highlight (called by LyricsSyncManager on broadcast)
+   * Move the highlight to the current line.
+   *
+   * Touches only the two lines involved. Re-querying and re-classing every
+   * line on each change was O(lines) work several times a minute.
    */
   updateCurrent(syncData: SyncData): void {
-    if (!this.isOpen || !this.elements.text) return;
+    if (!this.isOpen || !this.lineNodes.length) return;
+    if (syncData.currentIndex === this.highlightedIndex) return;
 
-    const lines = this.elements.text.querySelectorAll('.lyrics-line');
-    lines.forEach((line, index) => {
-      if (index === syncData.currentIndex) {
-        line.classList.add('current');
-      } else {
-        line.classList.remove('current');
-      }
-    });
+    this.lineNodes[this.highlightedIndex]?.classList.remove('current');
+    this.lineNodes[syncData.currentIndex]?.classList.add('current');
+    this.highlightedIndex = syncData.currentIndex;
 
     this.scrollToCurrentLine();
   }
@@ -1096,17 +1247,16 @@ class FullLyricsModalDisplay {
    * Scroll to current line if auto-scroll enabled
    */
   scrollToCurrentLine(): void {
-    if (!this.autoScrollEnabled || !this.elements.text) return;
+    if (!this.autoScrollEnabled) return;
 
-    const currentLine = this.elements.text.querySelector(
-      '.lyrics-line.current',
-    );
-    if (currentLine) {
-      currentLine.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    }
+    const currentLine =
+      this.lineNodes[this.highlightedIndex] ??
+      this.elements.text?.querySelector('.lyrics-line.current');
+
+    currentLine?.scrollIntoView({
+      behavior: reducedMotion.matches ? 'auto' : 'smooth',
+      block: 'center',
+    });
   }
 
   /**
@@ -1141,6 +1291,10 @@ let lastSyncTime = Date.now();
 let internalAnimationRunning = false;
 let isTrackChanging = false;
 let hasPermissionError = false;
+let lastProgressWrite = 0;
+
+// The progress bar transition covers the gap between writes
+const PROGRESS_WRITE_INTERVAL = 1000;
 
 function startInternalTimer(): void {
   if (internalAnimationRunning) return;
@@ -1149,42 +1303,65 @@ function startInternalTimer(): void {
 }
 
 /**
- * Main animation loop (60 FPS)
+ * Move the progress bar.
  *
- * Updates:
- * - Progress bar
- * - Time display
- * - Lyrics sync (atomic update via LyricsSyncManager)
- * - Word glow effect (high FPS for smoothness)
+ * Written about once a second: the CSS transition on .progress-fill draws the
+ * in-between frames, so writing it every frame only fought the transition.
+ * Seeks pass immediate=true to jump instead of gliding.
+ */
+function setProgressBar(percent: number, immediate = false): void {
+  const clamped = Math.max(0, Math.min(100, percent));
+
+  if (immediate) {
+    elements.progressBar.style.transition = 'none';
+    elements.progressBar.style.width = `${clamped}%`;
+    // Commit the jump before the transition comes back, otherwise the browser
+    // collapses both changes into one recalc and animates the seek
+    elements.progressBar.getBoundingClientRect();
+    elements.progressBar.style.transition = '';
+    lastProgressWrite = Date.now();
+    return;
+  }
+
+  elements.progressBar.style.width = `${clamped}%`;
+  lastProgressWrite = Date.now();
+}
+
+/**
+ * Main animation loop
+ *
+ * Runs only while playback is running: lyrics sync and the word glow are the
+ * only things that genuinely need frame-rate updates. The loop suspends itself
+ * when paused and is restarted by updateDisplay().
  */
 function updateInternalPosition(): void {
-  if (internalIsPlaying && currentMusicData && currentMusicData.duration) {
-    const now = Date.now();
-    const elapsed = (now - lastSyncTime) / 1000;
-    internalPosition += elapsed;
-    lastSyncTime = now;
-
-    if (internalPosition > currentMusicData.duration) {
-      internalPosition = currentMusicData.duration;
-    }
-
-    // Update progress bar (linear)
-    const progress = (internalPosition / currentMusicData.duration) * 100;
-    elements.progressBar.style.width = `${progress}%`;
-    elements.currentTime.textContent = formatTime(internalPosition);
-
-    // Update vinyl disc progress (circular)
-    vinylDiscController.updateProgress(
-      internalPosition / currentMusicData.duration,
-    );
-
-    // ★★★ ATOMIC SYNC ★★★
-    // Update position in sync manager (broadcasts to all displays when line changes)
-    lyricsSyncManager.updatePosition(internalPosition);
-
-    // Update word glow separately (needs 60 FPS, throttled internally to 30 FPS)
-    lyricsMainDisplay.updateGlow(internalPosition);
+  if (!internalIsPlaying || !currentMusicData?.duration) {
+    // Nothing is moving - stop burning frames until playback resumes
+    internalAnimationRunning = false;
+    return;
   }
+
+  const now = Date.now();
+  const elapsed = (now - lastSyncTime) / 1000;
+  internalPosition += elapsed;
+  lastSyncTime = now;
+
+  if (internalPosition > currentMusicData.duration) {
+    internalPosition = currentMusicData.duration;
+  }
+
+  // Progress bar and clock: ~1 Hz is all the resolution these have
+  if (now - lastProgressWrite >= PROGRESS_WRITE_INTERVAL) {
+    setProgressBar((internalPosition / currentMusicData.duration) * 100);
+    elements.currentTime.textContent = formatTime(internalPosition);
+  }
+
+  // ★★★ ATOMIC SYNC ★★★
+  // Update position in sync manager (broadcasts to all displays when line changes)
+  lyricsSyncManager.updatePosition(internalPosition);
+
+  // Update word glow separately (throttled internally to 30 FPS)
+  lyricsMainDisplay.updateGlow(internalPosition);
 
   requestAnimationFrame(updateInternalPosition);
 }
@@ -1223,7 +1400,7 @@ function updateDisplay(data: MusicData | null): void {
 
     elements.albumArt.classList.remove('show');
     vinylDiscController.hide();
-    elements.progressBar.style.width = '0%';
+    setProgressBar(0, true);
     elements.currentTime.textContent = '0:00';
     elements.duration.textContent = '0:00';
     updatePlayPauseButton(false);
@@ -1286,6 +1463,9 @@ function updateDisplay(data: MusicData | null): void {
     if (needsHardSync) {
       internalPosition = data.position;
       isTrackChanging = false;
+      // Jump rather than glide to the new position
+      setProgressBar((internalPosition / data.duration) * 100, true);
+      elements.currentTime.textContent = formatTime(internalPosition);
     }
 
     internalIsPlaying = data.isPlaying;
@@ -1293,8 +1473,13 @@ function updateDisplay(data: MusicData | null): void {
 
     elements.duration.textContent = formatTime(data.duration);
 
-    if (!internalAnimationRunning) {
+    if (data.isPlaying) {
+      // The loop suspends itself when paused, so resume it here
       startInternalTimer();
+    } else {
+      // Paused: paint the final position the loop will not draw
+      setProgressBar((internalPosition / data.duration) * 100, true);
+      elements.currentTime.textContent = formatTime(internalPosition);
     }
   }
 
@@ -1342,15 +1527,57 @@ function clearDetails(): void {
 
 window.musicAPI.onUpdate(updateDisplay);
 
+/**
+ * Explain the macOS Automation requirement the first time it bites.
+ *
+ * Previously the only clue was the track title turning into an error string,
+ * which reads like a broken app rather than a one-time system permission.
+ */
+function showPermissionOnboarding(): void {
+  document.body.classList.add('permission-needed');
+
+  // Storage can be unavailable on a file:// origin; the inline notice above
+  // still explains everything, so never let this throw
+  try {
+    if (localStorage.getItem(PERMISSION_HINT_KEY)) return;
+    localStorage.setItem(PERMISSION_HINT_KEY, '1');
+  } catch (_error) {
+    // Fall through and show the dialog anyway
+  }
+
+  showConfirm(
+    'One-time setup needed',
+    'macOS has to allow LyricGlow to read what Spotify and Music are playing.\n\n' +
+      'System Settings → Privacy & Security → Automation → LyricGlow → ' +
+      'turn on Spotify and Music.',
+    'Open Settings',
+  ).then((openSettings) => {
+    if (openSettings) {
+      window.musicAPI.openExternal(AUTOMATION_SETTINGS_URL);
+    }
+  });
+}
+
 // Permission error handlers
 window.musicAPI.onPermissionError(() => {
   hasPermissionError = true;
+  showPermissionOnboarding();
   updateDisplay(null); // Refresh display to show permission message
 });
 
 window.musicAPI.onPermissionGranted(() => {
   hasPermissionError = false;
+  document.body.classList.remove('permission-needed');
   // Display will update automatically when music data comes through
+});
+
+/**
+ * Translation progress indicator
+ */
+window.musicAPI.onTranslationStatus((status: { pending: boolean } | null) => {
+  document
+    .getElementById('translatingIndicator')
+    ?.classList.toggle('show', Boolean(status?.pending));
 });
 
 /**
@@ -1434,16 +1661,10 @@ class MetadataHandler {
       artistWebsite: document.getElementById('artistWebsite'),
       artistFacebook: document.getElementById('artistFacebook'),
       artistTwitter: document.getElementById('artistTwitter'),
-      artistListeners: document.getElementById('artistListeners'),
-      artistPlaycount: document.getElementById('artistPlaycount'),
-      trackPlaycount: document.getElementById('trackPlaycount'),
       artistProfile: document.getElementById('artistProfile'),
-      tags: document.getElementById('metadataTags'),
       bioSummary: document.getElementById('bioSummary'),
       bioExpand: document.getElementById('bioExpand'),
-      similarArtists: document.getElementById('similarArtists'),
       metadataBio: document.getElementById('metadataBio'),
-      metadataSimilar: document.getElementById('metadataSimilar'),
       carouselTrack: document.getElementById('carouselTrack'),
       carouselPrev: document.getElementById('carouselPrev'),
       carouselNext: document.getElementById('carouselNext'),
@@ -1611,36 +1832,7 @@ class MetadataHandler {
       this.elements.artistLinks.style.display = hasLinks ? 'flex' : 'none';
     }
 
-    // Update stats
     if (metadata.artist) {
-      if (metadata.artist.listeners) {
-        this.elements.artistListeners.textContent = `👥 ${metadata.artist.listeners} listeners`;
-        this.elements.artistListeners.style.display = 'inline-block';
-      } else {
-        this.elements.artistListeners.style.display = 'none';
-      }
-
-      if (metadata.artist.playcount) {
-        this.elements.artistPlaycount.textContent = `▶ ${metadata.artist.playcount} plays`;
-        this.elements.artistPlaycount.style.display = 'inline-block';
-      } else {
-        this.elements.artistPlaycount.style.display = 'none';
-      }
-
-      // Update tags
-      if (metadata.artist.tags && metadata.artist.tags.length > 0) {
-        this.elements.tags.innerHTML = '';
-        metadata.artist.tags.forEach((tag) => {
-          const tagEl = document.createElement('span');
-          tagEl.className = 'tag-pill';
-          tagEl.textContent = tag;
-          this.elements.tags.appendChild(tagEl);
-        });
-        this.elements.tags.style.display = 'flex';
-      } else {
-        this.elements.tags.style.display = 'none';
-      }
-
       // Update bio
       if (metadata.artist.bio?.summary) {
         const summary = metadata.artist.bio.summary;
@@ -1657,34 +1849,6 @@ class MetadataHandler {
       } else {
         this.elements.metadataBio.style.display = 'none';
       }
-
-      // Update similar artists
-      if (metadata.artist.similar && metadata.artist.similar.length > 0) {
-        this.elements.similarArtists.innerHTML = '';
-        metadata.artist.similar.forEach((artist, index) => {
-          const artistEl = document.createElement('span');
-          artistEl.className = 'similar-artist';
-          artistEl.textContent = artist.name;
-          artistEl.onclick = () => window.musicAPI.openExternal(artist.url);
-          this.elements.similarArtists.appendChild(artistEl);
-
-          if (index < (metadata.artist.similar?.length ?? 0) - 1) {
-            const separator = document.createTextNode(', ');
-            this.elements.similarArtists.appendChild(separator);
-          }
-        });
-        this.elements.metadataSimilar.style.display = 'block';
-      } else {
-        this.elements.metadataSimilar.style.display = 'none';
-      }
-    }
-
-    // Update track stats
-    if (metadata.track?.playcount) {
-      this.elements.trackPlaycount.textContent = `🎵 ${metadata.track.playcount} track plays`;
-      this.elements.trackPlaycount.style.display = 'inline-block';
-    } else {
-      this.elements.trackPlaycount.style.display = 'none';
     }
 
     // Update artist profile link
@@ -1774,7 +1938,15 @@ class MetadataHandler {
     if (tracks.length > 0) {
       this.elements.topTracksList.innerHTML = '';
 
-      for (const track of tracks) {
+      // Cache every cover at once: awaiting them one by one made the list
+      // appear a round-trip at a time
+      const covers = await Promise.all(
+        tracks.map((track) =>
+          track.image ? window.musicAPI.cacheImage(track.image) : null,
+        ),
+      );
+
+      tracks.forEach((track, index) => {
         const trackEl = document.createElement('div');
         trackEl.className = 'top-track-item';
 
@@ -1783,8 +1955,7 @@ class MetadataHandler {
         img.alt = track.name;
 
         if (track.image) {
-          const cachedImage = await window.musicAPI.cacheImage(track.image);
-          img.src = cachedImage || track.image;
+          img.src = covers[index] || track.image;
         }
 
         const info = document.createElement('div');
@@ -1810,7 +1981,7 @@ class MetadataHandler {
         };
 
         this.elements.topTracksList.appendChild(trackEl);
-      }
+      });
 
       this.elements.topTracksSection.style.display = 'block';
     } else {
@@ -1830,7 +2001,14 @@ class MetadataHandler {
     if (albums.length > 0) {
       this.elements.topAlbumsGrid.innerHTML = '';
 
-      for (const album of albums) {
+      // All covers in flight together rather than one round-trip per album
+      const covers = await Promise.all(
+        albums.map((album) =>
+          album.image ? window.musicAPI.cacheImage(album.image) : null,
+        ),
+      );
+
+      albums.forEach((album, index) => {
         const albumEl = document.createElement('div');
         albumEl.className = 'top-album-item';
 
@@ -1839,8 +2017,7 @@ class MetadataHandler {
         img.alt = album.name;
 
         if (album.image) {
-          const cachedImage = await window.musicAPI.cacheImage(album.image);
-          img.src = cachedImage || album.image;
+          img.src = covers[index] || album.image;
         }
 
         const name = document.createElement('div');
@@ -1860,7 +2037,7 @@ class MetadataHandler {
         };
 
         this.elements.topAlbumsGrid.appendChild(albumEl);
-      }
+      });
 
       this.elements.topAlbumsSection.style.display = 'block';
     } else {
@@ -1896,7 +2073,7 @@ class MetadataHandler {
     this.elements.imageModal.style.display = 'none';
   }
 
-  downloadImage(): void {
+  async downloadImage(): Promise<void> {
     const imageUrl = this.elements.modalImage.src;
 
     // Create safe filename from artist and track names
@@ -1917,13 +2094,25 @@ class MetadataHandler {
     const extension = imageUrl.includes('.png') ? 'png' : 'jpg';
     const filename = `${safeArtist}_-_${safeTrack}.${extension}`;
 
-    const link = document.createElement('a');
-    link.href = imageUrl;
-    link.download = filename;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Cached images live behind a custom scheme, which <a download> refuses to
+    // save directly - pull the bytes into a blob first
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(objectUrl);
+      showToast('Image saved to Downloads');
+    } catch (_error) {
+      showToast('Could not save the image', 'error');
+    }
   }
 
   toggleBio(): void {
@@ -1939,13 +2128,8 @@ class MetadataHandler {
 
   clear(): void {
     this.elements.container.style.display = 'none';
-    this.elements.artistListeners.textContent = '';
-    this.elements.artistPlaycount.textContent = '';
-    this.elements.trackPlaycount.textContent = '';
     this.elements.artistProfile.style.display = 'none';
-    this.elements.tags.innerHTML = '';
     this.elements.bioSummary.textContent = '';
-    this.elements.similarArtists.innerHTML = '';
     this.elements.carouselTrack.innerHTML = '';
     this.elements.topTracksList.innerHTML = '';
     this.elements.topAlbumsGrid.innerHTML = '';
@@ -2061,7 +2245,7 @@ class SettingsHandler {
 
     window.musicAPI.onSpotifyLoginError((error: string) => {
       console.error('Spotify login error:', error);
-      alert(`Login failed: ${error}`);
+      showAlert('Spotify login failed', error);
     });
   }
 
@@ -2153,13 +2337,16 @@ class SettingsHandler {
     const clearAllBtn = document.getElementById('cacheClearAllBtn');
     if (clearAllBtn) {
       clearAllBtn.addEventListener('click', async () => {
-        if (
-          confirm(
-            'Are you sure you want to clear all caches? This cannot be undone.',
-          )
-        ) {
+        const confirmed = await showConfirm(
+          'Clear all caches?',
+          'Lyrics, artwork, metadata and translations will be downloaded again next time. This cannot be undone.',
+          'Clear All',
+        );
+
+        if (confirmed) {
           await window.musicAPI.cacheClearAll();
           await this.loadCacheList();
+          showToast('Cache cleared');
         }
       });
     }
@@ -2177,15 +2364,20 @@ class SettingsHandler {
 
     if (clearBtn) {
       clearBtn.addEventListener('click', async () => {
-        if (
-          confirm(
-            'Are you sure you want to clear all logs? This cannot be undone.',
-          )
-        ) {
-          const success = await window.musicAPI.logsClear();
-          if (success) {
-            await this.loadLogsStats();
-          }
+        const confirmed = await showConfirm(
+          'Clear all logs?',
+          'Every log file is deleted. This cannot be undone.',
+          'Clear Logs',
+        );
+
+        if (!confirmed) return;
+
+        const success = await window.musicAPI.logsClear();
+        if (success) {
+          await this.loadLogsStats();
+          showToast('Logs cleared');
+        } else {
+          showToast('Could not clear the logs', 'error');
         }
       });
     }
@@ -2340,33 +2532,47 @@ class SettingsHandler {
       const item = document.createElement('div');
       item.className = 'cache-item';
 
-      const icon = this.getCacheIcon(entry.type);
-      const title = this.formatCacheTitle(entry.key, entry.type);
       const sizeMB = (entry.size / 1024 / 1024).toFixed(2);
-      const date = this.formatDate(entry.timestamp);
 
-      item.innerHTML = `
-        <div class="cache-item-icon">${icon}</div>
-        <div class="cache-item-info">
-          <div class="cache-item-title">${title}</div>
-          <div class="cache-item-meta">${sizeMB} MB • ${date}</div>
-        </div>
-        <button class="icon-btn icon-btn-danger cache-item-delete" data-type="${entry.type}" data-key="${entry.key}" title="Delete">×</button>
-      `;
+      // Built as nodes, never as an HTML string: cache keys are track titles
+      // and artist names straight from the player, so interpolating them into
+      // markup let a crafted track name inject elements into this list.
+      const icon = document.createElement('div');
+      icon.className = 'cache-item-icon';
+      icon.textContent = this.getCacheIcon(entry.type);
 
-      const deleteBtn = item.querySelector('.cache-item-delete');
-      if (deleteBtn) {
-        deleteBtn.addEventListener('click', async () => {
-          const success = await window.musicAPI.cacheDelete(
-            entry.type,
-            entry.key,
-          );
-          if (success) {
-            item.remove();
-            await this.loadCacheList();
-          }
-        });
-      }
+      const info = document.createElement('div');
+      info.className = 'cache-item-info';
+
+      const title = document.createElement('div');
+      title.className = 'cache-item-title';
+      title.textContent = this.formatCacheTitle(entry.key, entry.type);
+
+      const meta = document.createElement('div');
+      meta.className = 'cache-item-meta';
+      meta.textContent = `${sizeMB} MB • ${this.formatDate(entry.timestamp)}`;
+
+      info.appendChild(title);
+      info.appendChild(meta);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'icon-btn icon-btn-danger cache-item-delete';
+      deleteBtn.title = 'Delete';
+      deleteBtn.textContent = '×';
+      deleteBtn.addEventListener('click', async () => {
+        const success = await window.musicAPI.cacheDelete(
+          entry.type,
+          entry.key,
+        );
+        if (success) {
+          item.remove();
+          await this.loadCacheList();
+        }
+      });
+
+      item.appendChild(icon);
+      item.appendChild(info);
+      item.appendChild(deleteBtn);
 
       listEl.appendChild(item);
     });
@@ -2386,7 +2592,7 @@ class SettingsHandler {
     // Handle translation cache keys (format: "Song-Artist:langCode")
     if (type === 'translations' && key.includes(':')) {
       const [songArtist, langCode] = key.split(':');
-      const langName = this.getLanguageName(langCode || '');
+      const langName = getLanguageName(langCode || '');
       if (songArtist && langName) {
         const displayKey =
           songArtist.length > 35
@@ -2400,42 +2606,6 @@ class SettingsHandler {
       return `${key.substring(0, 47)}...`;
     }
     return key;
-  }
-
-  getLanguageName(code: string): string {
-    const languages: { [key: string]: string } = {
-      en: 'English',
-      es: 'Spanish',
-      fr: 'French',
-      de: 'German',
-      it: 'Italian',
-      pt: 'Portuguese',
-      ru: 'Russian',
-      ja: 'Japanese',
-      ko: 'Korean',
-      zh: 'Chinese',
-      ar: 'Arabic',
-      fa: 'Persian',
-      he: 'Hebrew',
-      hi: 'Hindi',
-      tr: 'Turkish',
-      nl: 'Dutch',
-      pl: 'Polish',
-      sv: 'Swedish',
-      da: 'Danish',
-      no: 'Norwegian',
-      fi: 'Finnish',
-      el: 'Greek',
-      cs: 'Czech',
-      hu: 'Hungarian',
-      ro: 'Romanian',
-      th: 'Thai',
-      vi: 'Vietnamese',
-      id: 'Indonesian',
-      ms: 'Malay',
-      uk: 'Ukrainian',
-    };
-    return languages[code] || code.toUpperCase();
   }
 
   formatDate(timestamp: number): string {
@@ -2465,7 +2635,6 @@ class UIVisibilityManager {
       'bio',
       'tracks',
       'albums',
-      'similar',
     ];
     this.settings = {};
   }
@@ -2583,6 +2752,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       window.musicAPI.closeWindow();
     });
   }
+
+  document
+    .getElementById('permissionOpenSettings')
+    ?.addEventListener('click', () => {
+      window.musicAPI.openExternal(AUTOMATION_SETTINGS_URL);
+    });
 
   if (elements.playPauseBtn) {
     elements.playPauseBtn.addEventListener('click', () => {

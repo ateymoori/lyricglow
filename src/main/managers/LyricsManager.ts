@@ -28,6 +28,7 @@ interface LRCLibResult {
 // Cache interface matching UnifiedCacheManager
 interface CacheManager {
   get(type: string, key: string): Promise<unknown>;
+  getStale(type: string, key: string): Promise<unknown>;
   set(type: string, key: string, value: unknown): Promise<boolean>;
 }
 
@@ -69,11 +70,16 @@ class LyricsManager {
 
     Logger.lyrics.warn(`Not found (${duration}ms): ${title} - ${artist}`);
 
-    // Offline fallback
-    const offlineCache = (await this.cache.get(
+    // Offline fallback: serve the expired copy rather than nothing
+    const offlineCache = (await this.cache.getStale(
       'lyrics',
       cacheKey,
     )) as LyricsData | null;
+
+    if (offlineCache) {
+      Logger.lyrics.debug(`Serving stale lyrics: ${title} - ${artist}`);
+    }
+
     return offlineCache;
   }
 
