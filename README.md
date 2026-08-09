@@ -5,9 +5,10 @@
 
 # LyricGlow
 
-### Real-Time Synchronized Lyrics for macOS
+### Real-Time Synced Lyrics for Spotify & Apple Music — in Your macOS Menu Bar
 
-Word-by-word lyrics highlighting for Spotify and Apple Music, in a floating window and in your menu bar.
+Karaoke-style word-by-word lyrics in a floating Liquid Glass window and live in the menu bar,
+with built-in translation into 43 languages. Free, open source, no account needed.
 
 <!-- Status Badges -->
 <p>
@@ -88,6 +89,21 @@ xattr -cr /Applications/LyricGlow.app
 
 <br>
 
+## Why LyricGlow?
+
+- **Translation is built in.** Every lyric line can show a live translation into any of
+  43 languages — including full RTL rendering for Persian, Arabic and Hebrew. Most lyrics
+  apps charge a subscription for this.
+- **Lyrics live in your menu bar.** The current line ticks by next to the clock, so the
+  window can stay hidden while you work.
+- **Private by design.** No account, no analytics, no tracking. Lyrics, artwork and
+  translations are fetched from open sources and cached on your disk.
+- **Light on the battery.** Polling is adaptive, UI updates are event-scheduled, and
+  rendering stops completely when nothing is playing.
+- **Works with both Spotify and Apple Music** — detection is local, via AppleScript.
+
+<br>
+
 ## Requirements
 
 | Requirement | Details |
@@ -133,7 +149,7 @@ The app detects the permission being granted and resumes automatically; no resta
 **Playback & Metadata**
 - Spotify and Apple Music detection
 - Play/pause, next, previous, seek
-- Vinyl disc animation with radial progress
+- Album art on a vinyl-disc display
 - Artist bio, country, genre, links
 - Artist image carousel + full-size viewer
 - Spotify top tracks & albums (after login)
@@ -265,7 +281,7 @@ by the code today:
 
 | Key | Purpose |
 |-----|---------|
-| `SPOTIFY_CLIENT_ID` | Enables "Login with Spotify" (top tracks & albums). Create an app at the [Spotify dashboard](https://developer.spotify.com/dashboard) and add `musicdisplay://callback` as a redirect URI. |
+| `SPOTIFY_CLIENT_ID` | Enables "Login with Spotify" (top tracks & albums). Create an app at the [Spotify dashboard](https://developer.spotify.com/dashboard) and add `musicdisplay://callback` as a redirect URI. **Note:** Spotify's current policy requires the app owner's account to hold an active Premium subscription before the Web API answers, and apps in development mode only accept users added in the dashboard. |
 | `CACHE_DURATION_HOURS` | Cache lifetime in hours (default `168` = 7 days). |
 
 The other keys in `.env.example` are placeholders — TheAudioDB uses a built-in public test key and
@@ -301,7 +317,7 @@ src/
 │                            # unified cache, image cache, update check
 ├── preload/index.ts         # contextBridge API exposed as window.musicAPI
 ├── renderer/index.ts        # UI logic: sync manager, displays, metadata, settings
-└── shared/utils/            # Logger (electron-log), SecureFetch (SSL fallback)
+└── shared/utils/            # Logger (electron-log), SecureFetch (verified HTTPS), LrcParser
 
 resources/                   # index.html + styles.css loaded by the renderer
 assets/fonts/                # Vazirmatn web font for RTL lyrics
@@ -310,10 +326,11 @@ scripts/                     # install.sh (end users), release.sh (maintainers)
 ```
 
 **How it fits together:** the main process runs a cached AppleScript through `osascript` on an
-adaptive interval (500 ms while playing, 2 s paused, 5 s idle), broadcasts track changes over IPC,
-and fetches lyrics/metadata in parallel. The renderer keeps its own 60 FPS position timer for
-smooth progress and word glow; the main process runs an independent 100 ms loop so the menu bar
-line stays correct even when the window is hidden.
+adaptive interval (1.8 s while playing, 3 s paused, 5 s idle, with an immediate poll after any
+transport action), broadcasts track changes over IPC, and fetches lyrics/metadata in parallel.
+The renderer interpolates position between polls for smooth progress and word glow, and stops
+rendering while paused; the menu bar line is scheduled to update exactly when the next lyric
+line is due, so it stays correct even when the window is hidden — at near-zero idle cost.
 
 </details>
 
@@ -327,6 +344,7 @@ line stays correct even when the window is hidden.
 | Window never appears | Menu bar icon → **Show Window**, or press `Cmd+L` |
 | No lyrics for a track | LRCLIB has no synced lyrics for it; only synced (`[mm:ss.xx]`) lyrics are shown |
 | Spotify login does nothing | `SPOTIFY_CLIENT_ID` is missing from `.env` (source builds only) |
+| Top tracks / albums stay empty after login | Spotify requires the **app owner** to hold Premium; the log shows one warning and the app pauses Spotify requests for 30 min. Artist data still loads from TheAudioDB |
 | Stale artwork or metadata | Settings → **Cache** → delete the entry or **Clear All** |
 | App won't open after download | `xattr -cr /Applications/LyricGlow.app` (unsigned build) |
 
