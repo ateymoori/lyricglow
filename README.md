@@ -49,9 +49,9 @@ with built-in translation into 43 languages. Free, open source, no account neede
 
 <!-- Demo GIF -->
 <br>
-<img src="screenshots/lyricglow-macos-app-demo-real-time-lyrics-synchronization.gif" alt="LyricGlow Demo" width="720">
+<img src="screenshots/lyricglow-macos-app-demo-real-time-lyrics-synchronization.gif" alt="LyricGlow demo — synced lyrics with word-by-word highlighting and live Persian translation" width="550">
 <br>
-<sub>Real-time synchronized lyrics with word-by-word highlighting</sub>
+<sub>Word-by-word highlighting with live translation under every line</sub>
 
 </div>
 
