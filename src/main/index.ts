@@ -1091,6 +1091,11 @@ function createWindow(): void {
   const windowHeight = 600;
   const padding = 20;
 
+  // LYRICGLOW_CAPTURE=1 keeps the window on the normal layer: the floating
+  // overlay level is invisible to macOS window pickers (screen recorders,
+  // Zoom/Meet window sharing), so captures need a plain window
+  const captureFriendly = process.env.LYRICGLOW_CAPTURE === '1';
+
   mainWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -1105,7 +1110,7 @@ function createWindow(): void {
     // Native macOS Liquid Glass vibrancy
     vibrancy: 'under-window',
     visualEffectState: 'active',
-    alwaysOnTop: true,
+    alwaysOnTop: !captureFriendly,
     skipTaskbar: true,
     focusable: true,
     hasShadow: true,
@@ -1120,8 +1125,10 @@ function createWindow(): void {
     },
   });
 
-  mainWindow.setAlwaysOnTop(true, 'floating');
-  mainWindow.setVisibleOnAllWorkspaces(true);
+  if (!captureFriendly) {
+    mainWindow.setAlwaysOnTop(true, 'floating');
+    mainWindow.setVisibleOnAllWorkspaces(true);
+  }
 
   Logger.app.debug(
     `Window positioned at: x=${width - windowWidth - padding}, y=${padding}`,
@@ -1131,6 +1138,12 @@ function createWindow(): void {
     // Auto-hide mode waits for playback to decide; everyone else sees it now
     if (windowEnabled && !autoHideEnabled) {
       showWindow();
+    }
+    // Without always-on-top the window starts behind other apps, so capture
+    // mode must raise it once or recorders see whatever covers it
+    if (captureFriendly) {
+      app.focus({ steal: true });
+      mainWindow?.moveTop();
     }
   });
 
