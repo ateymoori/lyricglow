@@ -1,31 +1,27 @@
 /**
  * Translation Manager
  *
- * Handles lyrics translation using Lingva Translate API.
- * Features: Batch translation, caching, fallback instances, RTL detection.
+ * Owns the translation strategy - caching, batching, index alignment and the
+ * per-line retry - and leaves the actual network calls to the provider chain.
+ * Which service does the translating is decided in main/translation/index.ts.
  */
 
-import https from 'node:https';
 import {
   type Language,
   SUPPORTED_LANGUAGES,
 } from '../../shared/constants/languages';
 import Logger from '../../shared/utils/Logger';
+import { createProviderChain, type ProviderChain } from '../translation';
 import type UnifiedCacheManager from './UnifiedCacheManager';
-
-// Lingva public instances (fallback support)
-const LINGVA_INSTANCES = [
-  'lingva.ml',
-  'translate.plausibility.cloud',
-  'lingva.lunar.icu',
-  'translate.projectsegfau.lt',
-];
 
 // Give up on the per-line fallback once the service keeps failing
 const MAX_LINE_FAILURES = 5;
 
 // Lines translated concurrently in the per-line fallback
 const LINE_CHUNK_SIZE = 4;
+
+// Budget for a single translation request
+const REQUEST_TIMEOUT_MS = 15000;
 
 // Language list lives in shared/ so the renderer can use the same data
 export { SUPPORTED_LANGUAGES };
@@ -39,11 +35,11 @@ interface TranslationResult {
 
 class TranslationManager {
   private cache: UnifiedCacheManager;
-  private currentInstance: number;
+  private providers: ProviderChain;
 
-  constructor(cache: UnifiedCacheManager) {
+  constructor(cache: UnifiedCacheManager, providers?: ProviderChain) {
     this.cache = cache;
-    this.currentInstance = 0;
+    this.providers = providers ?? createProviderChain();
   }
 
   /**
@@ -129,10 +125,7 @@ class TranslationManager {
     targetLang: string,
   ): Promise<string[] | null> {
     const separator = '\n\n';
-    const batch = await this.translateWithFallback(
-      lines.join(separator),
-      targetLang,
-    );
+    const [batch] = await this.request([lines.join(separator)], targetLang);
 
     if (batch) {
       const parts = batch.split(separator);
@@ -164,9 +157,7 @@ class TranslationManager {
     for (let start = 0; start < lines.length; start += LINE_CHUNK_SIZE) {
       const chunk = lines.slice(start, start + LINE_CHUNK_SIZE);
 
-      const results = await Promise.all(
-        chunk.map((line) => this.translateWithFallback(line, targetLang)),
-      );
+      const results = await this.request(chunk, targetLang);
 
       results.forEach((result, offset) => {
         if (result === null) {
@@ -190,93 +181,28 @@ class TranslationManager {
   }
 
   /**
-   * Translate text using Lingva API with fallback instances
+   * Hand a set of lines to the provider chain.
+   *
+   * A chain-level throw means no provider is usable right now; that is not an
+   * error the caller can act on, so it becomes an all-null result and the usual
+   * "nothing translated" path takes over.
    */
-  private async translateWithFallback(
-    text: string,
+  private async request(
+    lines: string[],
     targetLang: string,
-  ): Promise<string | null> {
-    const maxRetries = LINGVA_INSTANCES.length;
-
-    for (let i = 0; i < maxRetries; i++) {
-      const instanceIndex =
-        (this.currentInstance + i) % LINGVA_INSTANCES.length;
-      const instance = LINGVA_INSTANCES[instanceIndex];
-
-      if (!instance) continue;
-
-      const result = await this.lingvaRequest(instance, text, targetLang);
-
-      if (result) {
-        // Update current instance to the working one
-        this.currentInstance = instanceIndex;
-        return result;
-      }
-
-      Logger.lyrics.debug(
-        `Lingva instance failed: ${instance}, trying next...`,
+  ): Promise<(string | null)[]> {
+    try {
+      return await this.providers.translateBatch(
+        lines,
+        targetLang,
+        REQUEST_TIMEOUT_MS,
       );
+    } catch (error) {
+      Logger.lyrics.debug(
+        `Translation request failed: ${(error as Error).message}`,
+      );
+      return lines.map(() => null);
     }
-
-    return null;
-  }
-
-  /**
-   * Make request to Lingva API
-   */
-  private lingvaRequest(
-    instance: string,
-    text: string,
-    targetLang: string,
-  ): Promise<string | null> {
-    return new Promise((resolve) => {
-      const encodedText = encodeURIComponent(text);
-      const path = `/api/v1/auto/${targetLang}/${encodedText}`;
-
-      const options: https.RequestOptions = {
-        hostname: instance,
-        path,
-        method: 'GET',
-        timeout: 15000,
-        headers: {
-          'User-Agent': 'LyricGlow/1.0',
-        },
-      };
-
-      const req = https.request(options, (res) => {
-        // Set encoding to UTF-8 to properly handle unicode characters
-        res.setEncoding('utf8');
-        let data = '';
-
-        res.on('data', (chunk: string) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          try {
-            const json = JSON.parse(data) as { translation?: string };
-            if (json.translation) {
-              resolve(json.translation);
-            } else {
-              resolve(null);
-            }
-          } catch {
-            resolve(null);
-          }
-        });
-      });
-
-      req.on('timeout', () => {
-        req.destroy();
-        resolve(null);
-      });
-
-      req.on('error', () => {
-        resolve(null);
-      });
-
-      req.end();
-    });
   }
 
   /**

@@ -61,5 +61,3 @@ export function parseLRC(content: string | null | undefined): LyricLine[] {
 
   return lines.sort((a, b) => a.time - b.time);
 }
-
-export default parseLRC;
