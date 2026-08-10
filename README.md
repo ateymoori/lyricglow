@@ -1,7 +1,6 @@
 <div align="center">
 
-<!-- Logo & Title -->
-<img src="build/icon.png" alt="LyricGlow" width="140" height="140">
+<img src="build/icon.png" alt="LyricGlow — real-time synced lyrics app for macOS" width="120" height="120">
 
 # LyricGlow
 
@@ -10,81 +9,59 @@
 Karaoke-style word-by-word lyrics in a floating Liquid Glass window and live in the menu bar,
 with built-in translation into 43 languages. Free, open source, no account needed.
 
-<!-- Status Badges -->
 <p>
-  <a href="https://github.com/ateymoori/lyricglow/actions/workflows/ci.yml">
-    <img src="https://github.com/ateymoori/lyricglow/actions/workflows/ci.yml/badge.svg" alt="CI">
-  </a>
-  <a href="https://www.codefactor.io/repository/github/ateymoori/lyricglow">
-    <img src="https://www.codefactor.io/repository/github/ateymoori/lyricglow/badge" alt="CodeFactor">
-  </a>
-  <a href="https://github.com/ateymoori/lyricglow/releases">
-    <img src="https://img.shields.io/github/v/release/ateymoori/lyricglow?color=00ff9f&label=Version" alt="Version">
-  </a>
-  <a href="https://github.com/ateymoori/lyricglow/releases">
-    <img src="https://img.shields.io/github/downloads/ateymoori/lyricglow/total?color=00b8ff&label=Downloads" alt="Downloads">
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/ateymoori/lyricglow" alt="License">
-  </a>
+  <a href="https://github.com/ateymoori/lyricglow/actions/workflows/ci.yml"><img src="https://github.com/ateymoori/lyricglow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/ateymoori/lyricglow/releases"><img src="https://img.shields.io/github/v/release/ateymoori/lyricglow?color=00ff9f&label=Version" alt="Latest version"></a>
+  <a href="https://github.com/ateymoori/lyricglow/releases"><img src="https://img.shields.io/github/downloads/ateymoori/lyricglow/total?color=00b8ff&label=Downloads" alt="Total downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/ateymoori/lyricglow" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/macOS-11.0%2B-000?logo=apple&logoColor=white" alt="macOS 11+ — Apple Silicon and Intel">
 </p>
-
-<!-- Tech Stack -->
-<p>
-  <img src="https://img.shields.io/badge/macOS-11.0+-000?logo=apple&logoColor=white" alt="macOS">
-  <img src="https://img.shields.io/badge/Electron-33-47848F?logo=electron&logoColor=white" alt="Electron">
-  <img src="https://img.shields.io/badge/TypeScript-Strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
-  <img src="https://img.shields.io/badge/ARM64_|_x64-Universal-ff6b6b" alt="Architecture">
-</p>
-
-<!-- Community -->
-<p>
-  <a href="https://github.com/ateymoori/lyricglow/stargazers">
-    <img src="https://img.shields.io/github/stars/ateymoori/lyricglow?style=social" alt="Stars">
-  </a>
-  <a href="https://github.com/ateymoori/lyricglow/network/members">
-    <img src="https://img.shields.io/github/forks/ateymoori/lyricglow?style=social" alt="Forks">
-  </a>
-</p>
-
-<!-- Demo GIF -->
-<br>
-<img src="screenshots/lyricglow-macos-app-demo-real-time-lyrics-synchronization.gif" alt="LyricGlow demo — synced lyrics with word-by-word highlighting and live Persian translation" width="550">
-<br>
-<sub>Word-by-word highlighting with live translation under every line</sub>
-
-</div>
 
 <br>
 
-## Quick Install
+<table>
+<tr>
+<td align="center"><img src="screenshots/lyricglow-macos-app-demo-real-time-lyrics-synchronization.gif" alt="LyricGlow demo — synced lyrics with word-by-word karaoke highlighting and live Persian translation" width="345"><br><sub>Word-by-word glow · live Persian translation</sub></td>
+<td align="center"><img src="screenshots/lyricglow-macos-promo-spanish-english-lyrics-translation.gif" alt="LyricGlow promo — Despacito with Spanish lyrics translated live into English" width="345"><br><sub>Despacito — Spanish lyrics · live English translation</sub></td>
+</tr>
+</table>
 
-**Homebrew** (recommended):
+🎬 **Full promo videos:**
+[Spanish → English (Despacito)](https://github.com/ateymoori/lyricglow/releases/download/v0.7.0/lyricglow-promo-es.mp4) ·
+[English → Persian (Beat It)](https://github.com/ateymoori/lyricglow/releases/download/v0.7.0/lyricglow-promo-fa.mp4)
+
+<br>
 
 ```bash
 brew install --cask ateymoori/tap/lyricglow
 ```
 
-**Or the one-line installer:**
+</div>
+
+<br>
+
+## Install
+
+**Homebrew** (recommended — signed & notarized, zero warnings):
+
+```bash
+brew install --cask ateymoori/tap/lyricglow
+```
+
+**One-line installer** (no Homebrew needed):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ateymoori/lyricglow/main/scripts/install.sh | bash
 ```
 
-The installer detects your architecture, downloads the matching DMG from the latest GitHub release,
-installs it to `/Applications`, and launches the app.
-Re-running it upgrades an existing install and keeps your settings.
-
-> **Supports:** Apple Silicon (M1/M2/M3/M4) and Intel Macs • macOS 11.0+
+> **Runs on:** macOS 11.0+ · Apple Silicon (M1–M4) and Intel · needs the **Spotify** or **Apple Music** desktop app · internet for lyrics (cached content works offline)
 
 <details>
-<summary><strong>Manual Installation</strong></summary>
+<summary><strong>Manual installation & first-run permission</strong></summary>
 <br>
 
-1. Download from [Releases](https://github.com/ateymoori/lyricglow/releases):
-   - **Apple Silicon:** `LyricGlow-arm64.dmg`
-   - **Intel:** `LyricGlow-x64.dmg`
-2. Open DMG → Drag to Applications
+1. Download from [Releases](https://github.com/ateymoori/lyricglow/releases): `LyricGlow-arm64.dmg` (Apple Silicon) or `LyricGlow-x64.dmg` (Intel)
+2. Open the DMG → drag to Applications
 3. Open it — since v0.7.0 the app is code-signed and notarized (Developer ID: Royan AB), so macOS launches it without warnings
 
 Old unsigned builds (v0.6.1 and earlier) need one command if macOS refuses to open them:
@@ -92,6 +69,14 @@ Old unsigned builds (v0.6.1 and earlier) need one command if macOS refuses to op
 ```bash
 xattr -cr /Applications/LyricGlow.app
 ```
+
+**Automation permission:** LyricGlow reads the current track with AppleScript, so macOS asks for
+Automation access on first run. If you dismissed the prompt, the app shows a one-time explainer
+with an **Open Settings** button, or grant it manually in
+**System Settings → Privacy & Security → Automation → LyricGlow → enable Spotify / Music**.
+The app detects the grant and resumes automatically — no restart needed.
+
+> The app runs as a menu bar agent (`LSUIElement`) — no Dock icon, no application menu.
 
 </details>
 
@@ -109,30 +94,6 @@ xattr -cr /Applications/LyricGlow.app
 - **Light on the battery.** Polling is adaptive, UI updates are event-scheduled, and
   rendering stops completely when nothing is playing.
 - **Works with both Spotify and Apple Music** — detection is local, via AppleScript.
-
-<br>
-
-## Requirements
-
-| Requirement | Details |
-|-------------|---------|
-| macOS | 11.0 or later, Apple Silicon or Intel |
-| Music player | **Spotify** or **Apple Music** desktop app (playback state is read through AppleScript) |
-| Automation permission | Required on first run — see below |
-| Internet | Needed to fetch lyrics, artwork and metadata; cached content works offline |
-
-### Automation permission
-
-LyricGlow reads the currently playing track with AppleScript, so macOS asks for Automation access
-the first time it polls Spotify or Music. If you dismissed the prompt, the app explains what it
-needs — a one-time dialog with an **Open Settings** button, plus a panel in the window listing the
-steps — and you can grant it in:
-
-**System Settings → Privacy & Security → Automation → LyricGlow → enable Spotify / Music**
-
-The app detects the permission being granted and resumes automatically; no restart needed.
-
-> The app runs as a menu bar agent (`LSUIElement`), so it has no Dock icon and no application menu.
 
 <br>
 
@@ -183,9 +144,6 @@ The app detects the permission being granted and resumes automatically; no resta
 Translate's web endpoint with [Lingva Translate](https://lingva.ml/) as automatic fallback.
 Everything is cached on disk for 7 days by default.
 
-> Album artwork and the "Open in Spotify" link come from Spotify. Apple Music exposes extra
-> track details instead (year, genre, BPM, rating, play count), but no artwork URL.
-
 <br>
 
 ## Screenshots
@@ -202,43 +160,33 @@ Everything is cached on disk for 7 days by default.
 </tr>
 </table>
 
-<sub>Layouts are built from the <strong>Display</strong> settings tab — each section (player, lyrics, images, info, bio, tracks, albums) can be toggled independently.</sub>
+<sub>Layouts are built from the <strong>Display</strong> settings tab — each section can be toggled independently.</sub>
 
 <br><br>
 
 <img src="screenshots/lyricglow-macos-menu-bar-lyrics-animation.gif" alt="Live synced lyrics in the macOS menu bar next to the clock" width="480">
 <br>
 <sub>Live lyrics in the menu bar — works with the window hidden</sub>
-
-<br><br>
-
-<img src="screenshots/lyricglow-macos-promo-spanish-english-lyrics-translation.gif" alt="LyricGlow promo — Despacito with Spanish lyrics translated live into English" width="420">
-<br>
-<sub>Any song, your language — Spanish lyrics with live English translation</sub>
-
-<br>
-
-🎬 **Full promo videos:**
-[Spanish → English (Despacito)](https://github.com/ateymoori/lyricglow/releases/download/v0.7.0/lyricglow-promo-es.mp4) ·
-[English → Persian (Beat It)](https://github.com/ateymoori/lyricglow/releases/download/v0.7.0/lyricglow-promo-fa.mp4)
 </div>
 
 <br>
 
-## Usage
+## How to Use
 
 1. **Launch** LyricGlow from Applications — it lives in the menu bar
 2. **Play** music in Spotify or Apple Music
 3. **Watch** lyrics sync word-by-word in the window and next to the tray icon
 4. **Customize** via the gear icon, or the menu bar icon → Settings
 
-### Window controls
+<details>
+<summary><strong>Window controls & shortcuts</strong></summary>
+<br>
 
 | Action | Result |
 |--------|--------|
 | `Cmd+L` (global) | Toggle the floating window on/off |
 | Click menu bar icon | Show / focus the window (also re-enables it after `×`) |
-| Drag the window background | Move the window (it is frameless, resizable and always-on-top) |
+| Drag the window background | Move the window (frameless, resizable, always-on-top) |
 | Click / drag the progress bar | Seek to that position |
 | Click the line above / below | Jump to that lyric |
 | Click album art / vinyl | Open the track in Spotify (Spotify playback only) |
@@ -246,17 +194,16 @@ Everything is cached on disk for 7 days by default.
 | Click any line in the full lyrics | Jump to that point in the song |
 | `×` button | Hide the window and turn off **Show Window** |
 
-> After using `×`, bring the window back by clicking the menu bar icon, pressing `Cmd+L`,
-> or choosing **Show Window** from the menu bar menu.
-
 The full lyrics view follows the current line on its own. Scrolling it yourself takes over, and a
 **Resume auto-scroll** pill appears to hand control back. Clicking a line also resumes following.
 
-### Menu bar menu
+**Menu bar menu:** Show Window · Show Tray Lyrics · Settings · Check for Updates · Quit
 
-**Show Window** · **Show Tray Lyrics** · **Settings** · **Check for Updates** · **Quit**
+</details>
 
-### Settings tabs
+<details>
+<summary><strong>Settings & where your data lives</strong></summary>
+<br>
 
 | Tab | Contents |
 |-----|----------|
@@ -265,11 +212,6 @@ The full lyrics view follows the current line on its own. Scrolling it yourself 
 | **Cache** | Total size, per-entry list with delete, clear all |
 | **Logs** | Log file count/size, open the logs folder, clear logs |
 
-Destructive actions (clear cache, clear logs) ask for confirmation in an in-app dialog styled like
-the rest of the window, and report the result as a brief toast.
-
-### Where your data lives
-
 | Data | Path |
 |------|------|
 | Settings | `~/Library/Application Support/LyricGlow/config.json` |
@@ -277,6 +219,22 @@ the rest of the window, and report the result as a brief toast.
 | Logs | `~/Library/Logs/LyricGlow/main.log` |
 
 Spotify tokens are encrypted with the macOS Keychain-backed `safeStorage` API before being stored.
+
+</details>
+
+<br>
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| "Permission Required" in the window | Grant Automation access (see [Install](#install)) |
+| Window never appears | Menu bar icon → **Show Window**, or press `Cmd+L` |
+| No lyrics for a track | LRCLIB has no synced lyrics for it; only synced (`[mm:ss.xx]`) lyrics are shown |
+| Spotify login does nothing | `SPOTIFY_CLIENT_ID` is missing from `.env` (source builds only) |
+| Top tracks / albums stay empty after login | Spotify requires the **app owner** to hold Premium; the log shows one warning and the app pauses Spotify requests for 30 min. Artist data still loads from TheAudioDB |
+| Stale artwork or metadata | Settings → **Cache** → delete the entry or **Clear All** |
+| App won't open after download | Only old unsigned builds (v0.6.1 and earlier): `xattr -cr /Applications/LyricGlow.app`. v0.7.0+ is notarized and opens directly |
 
 <br>
 
@@ -288,28 +246,30 @@ Spotify tokens are encrypted with the macOS Keychain-backed `safeStorage` API be
 git clone https://github.com/ateymoori/lyricglow.git && cd lyricglow
 npm install
 cp .env.example .env      # optional: needed only for Spotify login
-npm run build             # compile main, preload and renderer into dist/
 npm start                 # build and launch the app
 ```
 
-The main process loads the renderer from `dist/renderer/resources/index.html`, so run
-`npm run build` at least once before `npm run dev`.
+CI runs `npm ci`, `npm run typecheck` and `npm run build` on `macos-latest` for every push and PR.
 
-### Environment variables
+<details>
+<summary><strong>Environment variables</strong></summary>
+<br>
 
-`.env` is optional and read from the project root at runtime. Only two keys are actually used
-by the code today:
+`.env` is optional and read from the project root at runtime. Only two keys are used:
 
 | Key | Purpose |
 |-----|---------|
 | `SPOTIFY_CLIENT_ID` | Enables "Login with Spotify" (top tracks & albums). Create an app at the [Spotify dashboard](https://developer.spotify.com/dashboard) and add `musicdisplay://callback` as a redirect URI. **Note:** Spotify's current policy requires the app owner's account to hold an active Premium subscription before the Web API answers, and apps in development mode only accept users added in the dashboard. |
 | `CACHE_DURATION_HOURS` | Cache lifetime in hours (default `168` = 7 days). |
 
-The other keys in `.env.example` are placeholders — TheAudioDB uses a built-in public test key and
-the display limits are currently constants in the source. `.env` is bundled into the packaged app,
-so build your DMG *after* creating it if you need Spotify login in a self-built release.
+`.env` is bundled into the packaged app, so build your DMG *after* creating it if you need
+Spotify login in a self-built release.
 
-### Scripts
+</details>
+
+<details>
+<summary><strong>Scripts & releasing</strong></summary>
+<br>
 
 | Command | What it does |
 |---------|--------------|
@@ -319,42 +279,36 @@ so build your DMG *after* creating it if you need Spotify login in a self-built 
 | `npm run typecheck` | `tsc --noEmit` for the node and web tsconfigs |
 | `npm run lint` / `npm run format` | Biome check / format `./src` |
 | `npm run quality` | knip (dead code) + jscpd (duplication) + Biome |
-| `npm run pack` | Unpacked app bundle in `release/` |
-| `npm run dist` / `npm run dist:mac` | DMGs for arm64 and x64 in `release/` |
-| `npm run release` | Full release pipeline: version bump, signed DMGs, notarization + stapling, git tag, GitHub release, Homebrew cask update (`scripts/release.sh`) |
+| `npm run dist:mac` | Signed DMGs for arm64 and x64 in `release/` |
+| `npm run release` | Full release pipeline: version bump, signed DMGs, notarization + stapling, git tag, GitHub release, Homebrew cask update |
 
-CI (`.github/workflows/ci.yml`) runs `npm ci`, `npm run typecheck` and `npm run build` on
-`macos-latest` for every push and PR to `main`. There is no automated test suite yet.
+**Releasing (maintainers):** add a `## [x.y.z]` section to `CHANGELOG.md`, then run
+`npm run release` (or `-- minor` / `-- major`). The script checks the tree is clean and in sync,
+bumps the version, builds both DMGs signed with the Royan AB Developer ID, notarizes and staples
+them with Apple, then tags, publishes the GitHub release, and updates the
+[Homebrew cask](https://github.com/ateymoori/homebrew-tap). One-time setup: the Developer ID
+certificate in the Keychain, a `notarytool` profile named `lyricglow-notary`, and an
+authenticated `gh` CLI.
 
-### Releasing (maintainers)
-
-1. Add a `## [x.y.z]` section to `CHANGELOG.md` — it becomes the GitHub release notes
-2. Run `npm run release` (or `npm run release -- minor` / `-- major`)
-
-The script checks the tree is clean and in sync, bumps the version, runs typecheck + lint,
-builds both DMGs signed with the Royan AB Developer ID, submits them to Apple for
-notarization and staples the tickets, then tags, publishes the GitHub release, and updates
-the [Homebrew cask](https://github.com/ateymoori/homebrew-tap). One-time machine setup:
-the Developer ID certificate in the Keychain, a `notarytool` credential profile named
-`lyricglow-notary`, and an authenticated `gh` CLI.
+</details>
 
 <details>
-<summary><strong>Project Structure</strong></summary>
+<summary><strong>Project structure & architecture</strong></summary>
 
 ```
 src/
 ├── main/                    # Electron main process
 │   ├── index.ts             # Lifecycle, window, tray, AppleScript polling, IPC handlers
 │   ├── auth/                # Spotify PKCE OAuth (token storage + refresh)
-│   └── managers/            # Lyrics, TheAudioDB, Spotify metadata, translation,
-│                            # unified cache, image cache, update check
+│   ├── managers/            # Lyrics, TheAudioDB, Spotify metadata, translation,
+│   │                        # unified cache, image cache, update check
+│   └── translation/         # Provider interface + Google Web / Lingva chain
 ├── preload/index.ts         # contextBridge API exposed as window.musicAPI
 ├── renderer/index.ts        # UI logic: sync manager, displays, metadata, settings
-└── shared/utils/            # Logger (electron-log), SecureFetch (verified HTTPS), LrcParser
+└── shared/utils/            # Logger, SecureFetch (verified HTTPS), LrcParser
 
 resources/                   # index.html + styles.css loaded by the renderer
-assets/fonts/                # Vazirmatn web font for RTL lyrics
-build/                       # App icon, template tray icons, DMG background, entitlements
+build/                       # App icon, tray icons, DMG background, entitlements
 scripts/                     # install.sh (end users), release.sh (maintainers)
 ```
 
@@ -366,20 +320,6 @@ rendering while paused; the menu bar line is scheduled to update exactly when th
 line is due, so it stays correct even when the window is hidden — at near-zero idle cost.
 
 </details>
-
-<br>
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| "Permission Required" in the window | Grant Automation access (see [Requirements](#requirements)) |
-| Window never appears | Menu bar icon → **Show Window**, or press `Cmd+L` |
-| No lyrics for a track | LRCLIB has no synced lyrics for it; only synced (`[mm:ss.xx]`) lyrics are shown |
-| Spotify login does nothing | `SPOTIFY_CLIENT_ID` is missing from `.env` (source builds only) |
-| Top tracks / albums stay empty after login | Spotify requires the **app owner** to hold Premium; the log shows one warning and the app pauses Spotify requests for 30 min. Artist data still loads from TheAudioDB |
-| Stale artwork or metadata | Settings → **Cache** → delete the entry or **Clear All** |
-| App won't open after download | Only old unsigned builds (v0.6.1 and earlier): `xattr -cr /Applications/LyricGlow.app`. v0.7.0+ is notarized and opens directly |
 
 <br>
 
