@@ -109,6 +109,7 @@ The app detects the grant and resumes automatically — no restart needed.
 - Full lyrics modal with auto-scroll
 - Click any line to jump there
 - Live lyric line in the menu bar
+- Floating Lyrics: just the line, on your desktop
 - Instrumental / not-found states
 - RTL support (Arabic, Persian, Hebrew)
 
@@ -193,11 +194,27 @@ Everything is cached on disk for 7 days by default.
 | Document button (next to ▶) | Open the full lyrics modal (`Esc` closes it) |
 | Click any line in the full lyrics | Jump to that point in the song |
 | `×` button | Hide the window and turn off **Show Window** |
+| **Floating Lyrics** (menu bar or Settings) | Turn the window into a bare lyric line on the desktop |
 
 The full lyrics view follows the current line on its own. Scrolling it yourself takes over, and a
 **Resume auto-scroll** pill appears to hand control back. Clicking a line also resumes following.
 
-**Menu bar menu:** Show Window · Show Tray Lyrics · Settings · Check for Updates · Quit
+### Floating Lyrics
+
+Like a desktop lyric overlay: only the current line, large and centred, with the word-by-word glow
+and the translation underneath. No window, no controls, no background — clicks pass straight
+through to whatever is behind, and the line floats above full-screen apps on every space.
+
+To move it, choose **Move Floating Lyrics** in the menu bar: the bar becomes draggable and outlines
+itself. Drag it where you want, then choose **Lock Floating Lyrics** to make it click-through again
+and remember the spot. Floating and normal layouts each remember their own position and size.
+
+While no line is playing (instrumental passages, or a track with no lyrics) the overlay draws
+nothing at all rather than parking a status message on your desktop. Opening **Settings** returns
+the window to the normal layout, since the settings panel does not fit in the slim bar.
+
+**Menu bar menu:** Show Window · Show Tray Lyrics · Floating Lyrics · Move/Lock Floating Lyrics ·
+Settings · Check for Updates · Quit
 
 </details>
 
@@ -207,7 +224,7 @@ The full lyrics view follows the current line on its own. Scrolling it yourself 
 
 | Tab | Contents |
 |-----|----------|
-| **General** | Launch at login, menu bar lyrics, translation on/off + target language, Spotify login/logout |
+| **General** | Launch at login, menu bar lyrics, Floating Lyrics, translation on/off + target language, Spotify login/logout |
 | **Display** | Show/hide each UI section, reset to defaults |
 | **Cache** | Total size, per-entry list with delete, clear all |
 | **Logs** | Log file count/size, open the logs folder, clear logs |

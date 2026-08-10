@@ -61,6 +61,11 @@ interface MusicAPI {
   setTrayLyrics: (enabled: boolean) => Promise<boolean>;
   onOpenSettings: (callback: () => void) => void;
 
+  // Floating lyrics
+  floatingGetState: () => Promise<{ enabled: boolean; moveMode: boolean }>;
+  floatingSetEnabled: (enabled: boolean) => Promise<boolean>;
+  onFloatingState: (callback: (payload: IpcPayload) => void) => void;
+
   // Logs
   logsGetStats: () => Promise<IpcPayload>;
   logsOpenFolder: () => Promise<boolean>;
@@ -202,6 +207,20 @@ const musicAPI: MusicAPI = {
   },
   onOpenSettings: (callback: () => void) => {
     ipcRenderer.on('open-settings', () => callback());
+  },
+
+  // Floating lyrics
+  floatingGetState: () => {
+    return ipcRenderer.invoke('floating:get-state');
+  },
+  floatingSetEnabled: (enabled: boolean) => {
+    return ipcRenderer.invoke('floating:set-enabled', enabled);
+  },
+  onFloatingState: (callback: (payload: IpcPayload) => void) => {
+    ipcRenderer.on(
+      'floating:state',
+      (_event: IpcRendererEvent, payload: IpcPayload) => callback(payload),
+    );
   },
 
   // Logs

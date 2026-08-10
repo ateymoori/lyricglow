@@ -3,6 +3,17 @@
 All notable changes to LyricGlow are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Floating Lyrics.** A desktop overlay mode that shows only the current lyric
+  line — large, centred, word-by-word glow, translation underneath, no window
+  chrome or background. It is click-through and floats above full-screen apps;
+  **Move Floating Lyrics** in the menu bar makes it draggable, **Lock Floating
+  Lyrics** puts it back and remembers the position. Toggle it from the menu bar
+  or Settings → General.
+
 ## [0.7.0] - 2026-08-09
 
 The biggest release so far: a full bug-fix round, security hardening, a large

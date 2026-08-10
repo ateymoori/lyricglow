@@ -52,6 +52,11 @@ interface SyncData {
   isTranslationRTL: boolean;
 }
 
+interface FloatingState {
+  enabled: boolean;
+  moveMode: boolean;
+}
+
 interface CacheEntry {
   type: string;
   key: string;
@@ -141,6 +146,9 @@ declare global {
       getTrayLyrics: () => Promise<boolean>;
       setTrayLyrics: (enabled: boolean) => Promise<boolean>;
       onOpenSettings: (callback: () => void) => void;
+      floatingGetState: () => Promise<FloatingState>;
+      floatingSetEnabled: (enabled: boolean) => Promise<boolean>;
+      onFloatingState: (callback: (payload: FloatingState) => void) => void;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       logsGetStats: () => Promise<any>;
       logsOpenFolder: () => Promise<boolean>;
@@ -210,6 +218,30 @@ const SCROLL_KEYS = [
   'End',
   ' ',
 ];
+
+/**
+ * Switch the window between the full player and the bare desktop lyric bar.
+ *
+ * Everything is driven by two body classes: the main process resizes and
+ * un-glasses the window, the stylesheet hides everything except the current
+ * line. The lyric sync, glow and translation pipeline is the same code in both
+ * layouts - only what is painted changes.
+ */
+function applyFloatingState(state: FloatingState | null): void {
+  document.body.classList.toggle('floating-mode', Boolean(state?.enabled));
+  document.body.classList.toggle(
+    'floating-move',
+    Boolean(state?.enabled && state.moveMode),
+  );
+
+  // Keep the settings toggle honest when the mode is changed from the tray
+  const checkbox = document.getElementById(
+    'settings-floating-lyrics',
+  ) as HTMLInputElement | null;
+  if (checkbox) checkbox.checked = Boolean(state?.enabled);
+}
+
+window.musicAPI.onFloatingState(applyFloatingState);
 
 /**
  * Transient message in the corner of the window.
@@ -2193,6 +2225,7 @@ class SettingsHandler {
     this.initLogsTab();
     this.initLaunchAtLogin();
     this.initTrayLyrics();
+    this.initFloatingLyrics();
     this.initTranslation();
 
     window.musicAPI.onOpenSettings(() => {
@@ -2438,6 +2471,27 @@ class SettingsHandler {
 
         checkbox.checked = !checkbox.checked;
         await window.musicAPI.setTrayLyrics(checkbox.checked);
+      });
+    }
+  }
+
+  async initFloatingLyrics(): Promise<void> {
+    const checkbox = document.getElementById(
+      'settings-floating-lyrics',
+    ) as HTMLInputElement;
+    if (!checkbox) return;
+
+    const state = await window.musicAPI.floatingGetState();
+    checkbox.checked = state.enabled;
+
+    const label = checkbox.closest('.visibility-option');
+    if (label) {
+      label.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        checkbox.checked = !checkbox.checked;
+        await window.musicAPI.floatingSetEnabled(checkbox.checked);
       });
     }
   }
@@ -2746,6 +2800,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   initProgressBarSeek();
   initHorizontalScrolling();
   updateDisplay(null);
+
+  // The main process may already have reshaped the window before this ran
+  applyFloatingState(await window.musicAPI.floatingGetState());
 
   if (elements.closeBtn) {
     elements.closeBtn.addEventListener('click', () => {

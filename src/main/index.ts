@@ -155,6 +155,21 @@ let settingsStore: Store | null = null;
 // Tray lyrics setting
 let trayLyricsEnabled = true; // Show lyrics in system tray (default: enabled)
 
+// Floating lyrics: the whole window becomes a bare lyric line on the desktop
+let floatingLyricsEnabled = false;
+let floatingMoveMode = false; // Temporarily draggable instead of click-through
+let normalBounds: Electron.Rectangle | null = null;
+let boundsSaveTimeout: NodeJS.Timeout | null = null;
+
+const FLOATING_WIDTH = 900;
+const FLOATING_HEIGHT = 140;
+const FLOATING_MIN_WIDTH = 240;
+const FLOATING_MIN_HEIGHT = 80;
+const FLOATING_BOTTOM_MARGIN = 60;
+const NORMAL_MIN_WIDTH = 300;
+const NORMAL_MIN_HEIGHT = 240;
+const BOUNDS_SAVE_DELAY = 500;
+
 // Translation settings
 let translationEnabled = false; // Enable lyrics translation (default: disabled)
 let translationTargetLang = 'en'; // Target language code (default: English)
@@ -212,6 +227,187 @@ async function loadSettings(): Promise<void> {
   trayLyricsEnabled = store.get('trayLyricsEnabled', true) as boolean;
   translationEnabled = store.get('translationEnabled', false) as boolean;
   translationTargetLang = store.get('translationTargetLang', 'en') as string;
+  floatingLyricsEnabled = store.get('floatingLyricsEnabled', false) as boolean;
+}
+
+/**
+ * Where the floating bar should sit: a slim strip centred near the bottom of
+ * the primary display, unless the user has moved it somewhere else.
+ */
+function floatingBounds(): Electron.Rectangle {
+  const stored = settingsStore?.get('floatingLyricsPosition') as
+    | Electron.Rectangle
+    | undefined;
+
+  if (stored && isOnScreen(stored)) return stored;
+
+  const { workArea } = screen.getPrimaryDisplay();
+  const width = Math.min(FLOATING_WIDTH, workArea.width - 40);
+
+  return {
+    width,
+    height: FLOATING_HEIGHT,
+    x: workArea.x + Math.round((workArea.width - width) / 2),
+    y: workArea.y + workArea.height - FLOATING_HEIGHT - FLOATING_BOTTOM_MARGIN,
+  };
+}
+
+/**
+ * Guard against a saved position on a display that is no longer attached
+ */
+function isOnScreen(bounds: Electron.Rectangle): boolean {
+  if (
+    typeof bounds.x !== 'number' ||
+    typeof bounds.y !== 'number' ||
+    typeof bounds.width !== 'number' ||
+    typeof bounds.height !== 'number'
+  ) {
+    return false;
+  }
+
+  return screen.getAllDisplays().some(({ workArea }) => {
+    return (
+      bounds.x < workArea.x + workArea.width &&
+      bounds.x + bounds.width > workArea.x &&
+      bounds.y < workArea.y + workArea.height &&
+      bounds.y + bounds.height > workArea.y
+    );
+  });
+}
+
+/**
+ * Persist the current geometry under the key for whichever layout is active,
+ * so the two layouts remember their own place on screen
+ */
+function saveCurrentBounds(): void {
+  if (!mainWindow || mainWindow.isDestroyed() || !settingsStore) return;
+
+  const bounds = mainWindow.getBounds();
+
+  if (floatingLyricsEnabled) {
+    settingsStore.set('floatingLyricsPosition', bounds);
+  } else {
+    normalBounds = bounds;
+    settingsStore.set('normalWindowBounds', bounds);
+  }
+}
+
+function scheduleBoundsSave(): void {
+  if (boundsSaveTimeout) clearTimeout(boundsSaveTimeout);
+
+  boundsSaveTimeout = setTimeout(() => {
+    boundsSaveTimeout = null;
+    saveCurrentBounds();
+  }, BOUNDS_SAVE_DELAY);
+}
+
+/**
+ * Tell the renderer which layout to draw
+ */
+function sendFloatingState(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('floating:state', {
+      enabled: floatingLyricsEnabled,
+      moveMode: floatingMoveMode,
+    });
+  }
+}
+
+/**
+ * Reshape the existing window into (or out of) the desktop lyric bar.
+ *
+ * Deliberately transforms the one window instead of opening a second one: the
+ * renderer already owns the lyric sync, glow and translation pipeline, and a
+ * second window would need its own copy of all of it.
+ */
+function applyFloatingMode(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  const captureFriendly = process.env.LYRICGLOW_CAPTURE === '1';
+
+  if (floatingLyricsEnabled) {
+    mainWindow.setMinimumSize(FLOATING_MIN_WIDTH, FLOATING_MIN_HEIGHT);
+    mainWindow.setVibrancy(null); // No glass behind desktop lyrics
+    mainWindow.setHasShadow(false); // A shadow would outline the empty window
+    mainWindow.setBounds(floatingBounds());
+
+    if (!captureFriendly) {
+      // Above full-screen apps and on every space
+      mainWindow.setAlwaysOnTop(true, 'screen-saver');
+      mainWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+      });
+    }
+
+    // Starts locked: clicks go straight through to whatever is behind
+    setFloatingMoveMode(false);
+    return;
+  }
+
+  floatingMoveMode = false;
+  mainWindow.setIgnoreMouseEvents(false);
+  mainWindow.setVibrancy('under-window');
+  mainWindow.setHasShadow(true);
+  mainWindow.setMinimumSize(NORMAL_MIN_WIDTH, NORMAL_MIN_HEIGHT);
+
+  if (normalBounds) {
+    mainWindow.setBounds(normalBounds);
+  }
+
+  if (!captureFriendly) {
+    mainWindow.setAlwaysOnTop(true, 'floating');
+    mainWindow.setVisibleOnAllWorkspaces(true);
+  }
+
+  sendFloatingState();
+}
+
+function saveFloatingLyricsSetting(enabled: boolean): void {
+  if (enabled === floatingLyricsEnabled) return;
+
+  // Remember where the normal window sat before it turns into a bar
+  if (enabled) {
+    saveCurrentBounds();
+  }
+
+  floatingLyricsEnabled = enabled;
+  settingsStore?.set('floatingLyricsEnabled', enabled);
+
+  // Floating lyrics only mean anything if the window is allowed on screen
+  if (enabled && !windowEnabled) {
+    saveWindowEnabledSetting(true);
+  }
+
+  applyFloatingMode();
+  showWindow();
+
+  Logger.app.info(`Floating lyrics ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+/**
+ * Move mode makes the otherwise click-through bar draggable for a moment.
+ * Locking it again restores click-through and stores where it ended up.
+ */
+function setFloatingMoveMode(enabled: boolean): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  floatingMoveMode = enabled && floatingLyricsEnabled;
+
+  if (floatingLyricsEnabled && !floatingMoveMode) {
+    // forward: true still delivers hover events, so the renderer keeps
+    // painting normally while the clicks themselves pass through
+    mainWindow.setIgnoreMouseEvents(true, { forward: true });
+    saveCurrentBounds();
+  } else {
+    mainWindow.setIgnoreMouseEvents(false);
+  }
+
+  if (floatingMoveMode) {
+    mainWindow.focus();
+  }
+
+  sendFloatingState();
+  updateTrayMenu();
 }
 
 function saveWindowEnabledSetting(enabled: boolean): void {
@@ -1014,11 +1210,38 @@ function updateTrayMenu(): void {
         updateTrayMenu();
       },
     },
+    {
+      label: 'Floating Lyrics',
+      type: 'checkbox',
+      checked: floatingLyricsEnabled,
+      click: () => {
+        saveFloatingLyricsSetting(!floatingLyricsEnabled);
+        updateTrayMenu();
+      },
+    },
+    // Only useful while the bar is on screen
+    ...(floatingLyricsEnabled
+      ? [
+          {
+            label: floatingMoveMode
+              ? 'Lock Floating Lyrics'
+              : 'Move Floating Lyrics',
+            click: () => setFloatingMoveMode(!floatingMoveMode),
+          },
+        ]
+      : []),
     { type: 'separator' },
     {
       label: 'Settings',
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
+          // The settings panel cannot fit in the slim bar, so opening it
+          // returns the window to the normal layout
+          if (floatingLyricsEnabled) {
+            saveFloatingLyricsSetting(false);
+            updateTrayMenu();
+          }
+
           // Settings live inside the window, so the window has to stay enabled.
           // Flipping the flag back would let the next poll hide it again.
           if (!windowEnabled) {
@@ -1134,7 +1357,23 @@ function createWindow(): void {
     `Window positioned at: x=${width - windowWidth - padding}, y=${padding}`,
   );
 
+  // Restores the geometry each layout was last left in
+  normalBounds =
+    (settingsStore?.get('normalWindowBounds') as Electron.Rectangle | null) ??
+    mainWindow.getBounds();
+  if (normalBounds && !isOnScreen(normalBounds)) {
+    normalBounds = mainWindow.getBounds();
+  }
+
+  mainWindow.on('moved', scheduleBoundsSave);
+  mainWindow.on('resized', scheduleBoundsSave);
+
   mainWindow.once('ready-to-show', () => {
+    // Reshape before the first paint if the bar was left switched on
+    if (floatingLyricsEnabled) {
+      applyFloatingMode();
+    }
+
     // Auto-hide mode waits for playback to decide; everyone else sees it now
     if (windowEnabled && !autoHideEnabled) {
       showWindow();
@@ -1471,6 +1710,17 @@ ipcMain.handle('settings:get-tray-lyrics', () => {
   return trayLyricsEnabled;
 });
 
+// Floating lyrics
+ipcMain.handle('floating:get-state', () => {
+  return { enabled: floatingLyricsEnabled, moveMode: floatingMoveMode };
+});
+
+ipcMain.handle('floating:set-enabled', (_event, enabled: boolean) => {
+  saveFloatingLyricsSetting(enabled);
+  updateTrayMenu();
+  return true;
+});
+
 ipcMain.handle('settings:set-tray-lyrics', (_event, enabled: boolean) => {
   saveTrayLyricsSetting(enabled);
   return true;
@@ -1564,6 +1814,10 @@ app.on('before-quit', () => {
   globalShortcut.unregisterAll();
   if (hideTimeout) clearTimeout(hideTimeout);
   if (promptPollTimeout) clearTimeout(promptPollTimeout);
+  if (boundsSaveTimeout) {
+    clearTimeout(boundsSaveTimeout);
+    saveCurrentBounds(); // Do not lose a move made just before quitting
+  }
   if (pollInterval) {
     clearInterval(pollInterval);
   }

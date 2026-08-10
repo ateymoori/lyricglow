@@ -2205,3 +2205,127 @@ body.permission-needed .metadata-container { display: none; }
   .resume-scroll-pill { transform: none; }
   .resume-scroll-pill.show { transform: translateX(-50%); }
 }
+
+/* ==========================================
+   24. FLOATING LYRICS (desktop overlay)
+   ========================================== */
+
+/* Everything except the current line and its translation is hidden. The window
+   itself is already transparent; here the glass, chrome and padding go away so
+   the text looks painted straight onto the desktop. */
+body.floating-mode .player-content,
+body.floating-mode .metadata-container,
+body.floating-mode .permission-notice,
+body.floating-mode .header-buttons,
+body.floating-mode .translating-indicator,
+body.floating-mode .settings-modal,
+body.floating-mode .image-modal,
+body.floating-mode .full-lyrics-modal,
+body.floating-mode .app-dialog-backdrop,
+body.floating-mode .toast-stack,
+body.floating-mode .lyrics-previous,
+body.floating-mode .lyrics-next,
+body.floating-mode .lyrics-translation-prev,
+body.floating-mode .lyrics-translation-next {
+  display: none !important;
+}
+
+body.floating-mode .player-widget {
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: var(--space-2) var(--space-4);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  -webkit-app-region: no-drag;
+}
+
+body.floating-mode .player-widget::before { display: none; }
+
+body.floating-mode .lyrics-container {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: center;
+}
+
+body.floating-mode .lyrics-current-wrapper {
+  background: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+/* Readable on any wallpaper: layered shadow instead of a plate or pill */
+body.floating-mode .lyrics-current,
+body.floating-mode .lyrics-translation-current {
+  color: #fff;
+  text-align: center;
+  text-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.85),
+    0 2px 12px rgba(0, 0, 0, 0.85);
+}
+
+body.floating-mode .lyrics-current {
+  font-size: 34px;
+  line-height: var(--leading-tight);
+  font-weight: var(--font-semibold);
+}
+
+/* Only takes space when there is a translation to show */
+body.floating-mode .lyrics-container.has-translation .lyrics-translation-current {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: 18px;
+  font-weight: var(--font-regular);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* Karaoke read-through: words not yet sung sit back, sung words come forward.
+   The shadow is repeated here because the glow rule sets text-shadow too and
+   would otherwise drop the readability layers. */
+body.floating-mode .lyrics-word {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+body.floating-mode .lyrics-word.glowing {
+  color: #fff;
+  text-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.85),
+    0 2px 12px rgba(0, 0, 0, 0.85),
+    0 0 calc(14px * var(--glow-intensity, 1)) rgba(120, 190, 255, 0.55);
+}
+
+/* No lyric line means nothing is drawn at all - a bar reading "No lyrics
+   available" would sit on the desktop for the whole song */
+body.floating-mode .lyrics-container[data-state] { display: none; }
+
+/* Move mode: the bar becomes draggable and shows where to grab it */
+body.floating-mode.floating-move .player-widget {
+  -webkit-app-region: drag;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px dashed rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-lg);
+}
+
+body.floating-mode.floating-move .lyrics-container::after {
+  content: 'Drag to move · then choose Lock Floating Lyrics in the menu bar';
+  display: block;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+
+/* Empty state while moving, so there is always something to grab */
+body.floating-mode.floating-move .lyrics-container[data-state] {
+  display: block;
+}
