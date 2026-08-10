@@ -3,7 +3,7 @@
 All notable changes to LyricGlow are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.0] - 2026-08-10
 
 ### Added
 
@@ -13,6 +13,20 @@ This project follows [Semantic Versioning](https://semver.org/).
   **Move Floating Lyrics** in the menu bar makes it draggable, **Lock Floating
   Lyrics** puts it back and remembers the position. Toggle it from the menu bar
   or Settings → General.
+- **Capture-friendly mode.** Launching with `LYRICGLOW_CAPTURE=1` keeps the
+  window on the normal layer, so screen recorders and the window pickers in
+  Zoom, Meet and Cap can finally see and share it. (The always-on-top overlay
+  layer is invisible to them.)
+
+### Changed
+
+- **Translation is far more reliable — and faster.** Translation now runs
+  through a modular provider system: Google Translate's own web endpoint
+  first, Lingva as automatic fallback. A dead service gets one log line and a
+  10-minute cooldown instead of a 60-second retry storm per song. Fresh songs
+  translate in about a second; previously cached translations are untouched.
+- New retina demo GIFs, a promo-video preview, and two downloadable promo
+  videos in the README; repo media slimmed from 16 MB to ~3 MB.
 
 ## [0.7.0] - 2026-08-09
 
