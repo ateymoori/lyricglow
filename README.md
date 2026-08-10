@@ -179,8 +179,9 @@ The app detects the permission being granted and resumes automatically; no resta
 
 **Data sources:** synced lyrics from [LRCLIB](https://lrclib.net/), artist metadata from
 [TheAudioDB](https://www.theaudiodb.com/), top tracks/albums from the
-[Spotify Web API](https://developer.spotify.com/) (optional login), translations from
-[Lingva Translate](https://lingva.ml/). Everything is cached on disk for 7 days by default.
+[Spotify Web API](https://developer.spotify.com/) (optional login), translations from Google
+Translate's web endpoint with [Lingva Translate](https://lingva.ml/) as automatic fallback.
+Everything is cached on disk for 7 days by default.
 
 > Album artwork and the "Open in Spotify" link come from Spotify. Apple Music exposes extra
 > track details instead (year, genre, BPM, rating, play count), but no artwork URL.
@@ -192,12 +193,12 @@ The app detects the permission being granted and resumes automatically; no resta
 <div align="center">
 <table>
 <tr>
-<td align="center"><img src="screenshots/lyricglow-macos-full-mode-artist-metadata-lyrics.png" width="360"><br><strong>All sections visible</strong></td>
-<td align="center"><img src="screenshots/lyricglow-macos-compact-mode-floating-widget.png" width="360"><br><strong>Compact — metadata hidden</strong></td>
+<td align="center"><img src="screenshots/lyricglow-macos-full-mode-artist-metadata-lyrics.png" alt="LyricGlow full mode — synced lyrics with artist bio, top tracks and albums" width="360"><br><strong>All sections visible</strong></td>
+<td align="center"><img src="screenshots/lyricglow-macos-compact-mode-floating-widget.png" alt="LyricGlow compact mode — floating lyrics widget for Spotify on macOS" width="360"><br><strong>Compact — metadata hidden</strong></td>
 </tr>
 <tr>
-<td align="center"><img src="screenshots/lyricglow-macos-lyrics-only-mode-word-highlighting.png" width="360"><br><strong>Lyrics only</strong></td>
-<td align="center"><img src="screenshots/lyricglow-macos-rtl-support-persian-arabic-hebrew.png" width="360"><br><strong>RTL support</strong></td>
+<td align="center"><img src="screenshots/lyricglow-macos-lyrics-only-mode-word-highlighting.png" alt="Lyrics-only mode with karaoke word-by-word highlighting" width="360"><br><strong>Lyrics only</strong></td>
+<td align="center"><img src="screenshots/lyricglow-macos-rtl-support-persian-arabic-hebrew.png" alt="RTL lyrics support — Persian, Arabic and Hebrew translation" width="360"><br><strong>RTL support</strong></td>
 </tr>
 </table>
 
@@ -205,9 +206,9 @@ The app detects the permission being granted and resumes automatically; no resta
 
 <br><br>
 
-<img src="screenshots/lyricglow-macos-menu-bar-lyrics-animation.gif" width="480">
+<img src="screenshots/lyricglow-macos-menu-bar-lyrics-animation.gif" alt="Live synced lyrics in the macOS menu bar next to the clock" width="480">
 <br>
-<sub>Menu Bar Integration</sub>
+<sub>Live lyrics in the menu bar — works with the window hidden</sub>
 </div>
 
 <br>
@@ -390,7 +391,7 @@ Please run `npm run typecheck` and `npm run lint` before opening a PR.
 | [LRCLIB](https://lrclib.net/) | Synchronized lyrics |
 | [TheAudioDB](https://www.theaudiodb.com/) | Artist metadata, biography, images |
 | [Spotify API](https://developer.spotify.com/) | Top tracks & albums, artist details |
-| [Lingva Translate](https://lingva.ml/) | Lyrics translation (43 languages) |
+| Google Translate / [Lingva](https://lingva.ml/) | Lyrics translation (43 languages, with fallback) |
 | [Vazirmatn](https://github.com/rastikerdar/vazirmatn) | Font for Persian/Arabic lyrics |
 
 <br>
@@ -401,11 +402,7 @@ Please run `npm run typecheck` and `npm run lint` before opening a PR.
 
 **MIT License** © [AmirHossein Teymoori](https://github.com/ateymoori)
 
-<p>
-  <a href="https://github.com/ateymoori/lyricglow/stargazers">
-    <img src="https://img.shields.io/github/stars/ateymoori/lyricglow?style=for-the-badge&color=ff6b6b" alt="Stars">
-  </a>
-</p>
+If LyricGlow makes your music better, a ⭐ helps others find it.
 
 [Report Bug](https://github.com/ateymoori/lyricglow/issues) · [Request Feature](https://github.com/ateymoori/lyricglow/issues) · [Changelog](CHANGELOG.md) · [Releases](https://github.com/ateymoori/lyricglow/releases)
 
