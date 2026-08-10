@@ -265,6 +265,10 @@ CI runs `npm ci`, `npm run typecheck` and `npm run build` on `macos-latest` for 
 `.env` is bundled into the packaged app, so build your DMG *after* creating it if you need
 Spotify login in a self-built release.
 
+One extra launch-time variable: `LYRICGLOW_CAPTURE=1` starts the window on the normal layer
+instead of always-on-top, so screen recorders and Zoom/Meet window pickers can see it —
+macOS hides overlay windows from window capture. Used for demo recordings and screen sharing.
+
 </details>
 
 <details>
