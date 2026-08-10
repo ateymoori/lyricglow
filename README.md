@@ -59,12 +59,20 @@ with built-in translation into 43 languages. Free, open source, no account neede
 
 ## Quick Install
 
+**Homebrew** (recommended):
+
+```bash
+brew install --cask ateymoori/tap/lyricglow
+```
+
+**Or the one-line installer:**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ateymoori/lyricglow/main/scripts/install.sh | bash
 ```
 
 The installer detects your architecture, downloads the matching DMG from the latest GitHub release,
-installs it to `/Applications`, removes the Gatekeeper quarantine flag, and launches the app.
+installs it to `/Applications`, and launches the app.
 Re-running it upgrades an existing install and keeps your settings.
 
 > **Supports:** Apple Silicon (M1/M2/M3/M4) and Intel Macs • macOS 11.0+
@@ -77,9 +85,9 @@ Re-running it upgrades an existing install and keeps your settings.
    - **Apple Silicon:** `LyricGlow-arm64.dmg`
    - **Intel:** `LyricGlow-x64.dmg`
 2. Open DMG → Drag to Applications
-3. First launch: Right-click → Open (the app is not code-signed or notarized)
+3. Open it — since v0.7.0 the app is code-signed and notarized (Developer ID: Royan AB), so macOS launches it without warnings
 
-If macOS still refuses to open it:
+Old unsigned builds (v0.6.1 and earlier) need one command if macOS refuses to open them:
 
 ```bash
 xattr -cr /Applications/LyricGlow.app
@@ -346,7 +354,7 @@ line is due, so it stays correct even when the window is hidden — at near-zero
 | Spotify login does nothing | `SPOTIFY_CLIENT_ID` is missing from `.env` (source builds only) |
 | Top tracks / albums stay empty after login | Spotify requires the **app owner** to hold Premium; the log shows one warning and the app pauses Spotify requests for 30 min. Artist data still loads from TheAudioDB |
 | Stale artwork or metadata | Settings → **Cache** → delete the entry or **Clear All** |
-| App won't open after download | `xattr -cr /Applications/LyricGlow.app` (unsigned build) |
+| App won't open after download | Only old unsigned builds (v0.6.1 and earlier): `xattr -cr /Applications/LyricGlow.app`. v0.7.0+ is notarized and opens directly |
 
 <br>
 

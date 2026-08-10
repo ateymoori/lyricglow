@@ -35,7 +35,7 @@ mac:
   artifactName: ${productName}-${arch}.${ext}
   hardenedRuntime: true
   gatekeeperAssess: false
-  identity: null
+  identity: "Royan AB (59XUWMG2BT)"
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:

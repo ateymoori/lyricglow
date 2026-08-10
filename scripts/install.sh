@@ -200,7 +200,7 @@ if [[ ! -d "$INSTALL_DIR/$APP_NAME.app" ]]; then
     exit 1
 fi
 
-# Remove quarantine attribute (bypass Gatekeeper for unsigned app)
+# Remove quarantine attribute (harmless on notarized v0.7.0+; needed for old unsigned releases)
 echo -e "${BLUE}→${NC} Configuring security..."
 xattr -cr "$INSTALL_DIR/$APP_NAME.app" 2>/dev/null || true
 echo -e "${GREEN}✓${NC} Security configured"
