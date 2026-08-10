@@ -201,6 +201,12 @@ The full lyrics view follows the current line on its own. Scrolling it yourself 
 
 ### Floating Lyrics
 
+<div align="center">
+<img src="screenshots/lyricglow-macos-floating-lyrics-desktop-overlay.gif" alt="LyricGlow Floating Lyrics — click-through lyric line with live Persian translation floating over the desktop" width="720">
+<br>
+<sub>Only the words — click-through, above every app, translation included</sub>
+</div>
+
 Like a desktop lyric overlay: only the current line, large and centred, with the word-by-word glow
 and the translation underneath. No window, no controls, no background — clicks pass straight
 through to whatever is behind, and the line floats above full-screen apps on every space.
