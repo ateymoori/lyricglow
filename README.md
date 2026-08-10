@@ -209,6 +209,18 @@ Everything is cached on disk for 7 days by default.
 <img src="screenshots/lyricglow-macos-menu-bar-lyrics-animation.gif" alt="Live synced lyrics in the macOS menu bar next to the clock" width="480">
 <br>
 <sub>Live lyrics in the menu bar — works with the window hidden</sub>
+
+<br><br>
+
+<img src="screenshots/lyricglow-macos-promo-spanish-english-lyrics-translation.gif" alt="LyricGlow promo — Despacito with Spanish lyrics translated live into English" width="420">
+<br>
+<sub>Any song, your language — Spanish lyrics with live English translation</sub>
+
+<br>
+
+🎬 **Full promo videos:**
+[Spanish → English (Despacito)](https://github.com/ateymoori/lyricglow/releases/download/v0.7.0/lyricglow-promo-es.mp4) ·
+[English → Persian (Beat It)](https://github.com/ateymoori/lyricglow/releases/download/v0.7.0/lyricglow-promo-fa.mp4)
 </div>
 
 <br>
