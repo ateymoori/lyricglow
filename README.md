@@ -308,10 +308,22 @@ so build your DMG *after* creating it if you need Spotify login in a self-built 
 | `npm run quality` | knip (dead code) + jscpd (duplication) + Biome |
 | `npm run pack` | Unpacked app bundle in `release/` |
 | `npm run dist` / `npm run dist:mac` | DMGs for arm64 and x64 in `release/` |
-| `npm run release` | Bump patch version, clean `release/`, build the DMG (`scripts/release.sh`) |
+| `npm run release` | Full release pipeline: version bump, signed DMGs, notarization + stapling, git tag, GitHub release, Homebrew cask update (`scripts/release.sh`) |
 
 CI (`.github/workflows/ci.yml`) runs `npm ci`, `npm run typecheck` and `npm run build` on
 `macos-latest` for every push and PR to `main`. There is no automated test suite yet.
+
+### Releasing (maintainers)
+
+1. Add a `## [x.y.z]` section to `CHANGELOG.md` — it becomes the GitHub release notes
+2. Run `npm run release` (or `npm run release -- minor` / `-- major`)
+
+The script checks the tree is clean and in sync, bumps the version, runs typecheck + lint,
+builds both DMGs signed with the Royan AB Developer ID, submits them to Apple for
+notarization and staples the tickets, then tags, publishes the GitHub release, and updates
+the [Homebrew cask](https://github.com/ateymoori/homebrew-tap). One-time machine setup:
+the Developer ID certificate in the Keychain, a `notarytool` credential profile named
+`lyricglow-notary`, and an authenticated `gh` CLI.
 
 <details>
 <summary><strong>Project Structure</strong></summary>
