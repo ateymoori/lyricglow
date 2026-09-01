@@ -863,41 +863,108 @@ end if
  */
 const YTM_API_URL = 'http://127.0.0.1:26538/api/v1/song';
 const YTM_BACKOFF_MS = 30_000;
+/**
+ * While the API server reports a song we re-read it this often, on top of the
+ * regular poll, purely to keep the position anchor fresh (see
+ * updateYtmAnchor). It's a localhost request for ~1KB of JSON, so it's cheap,
+ * and it bounds how late we notice a play/pause/track change.
+ */
+const YTM_WATCH_INTERVAL_MS = 500;
+/**
+ * elapsedSeconds is floored to whole seconds (the truth is on average 0.5s
+ * ahead) and we see each change up to one watch interval late (on average
+ * half of it) - so this is the expected true position when we (re)anchor to
+ * a fresh report.
+ */
+const YTM_REPORT_BIAS_S = 0.5 + YTM_WATCH_INTERVAL_MS / 2000;
 let ytmUnavailableUntil = 0;
 let ytmLoggedAvailable = false;
+let ytmWatchTimer: NodeJS.Timeout | null = null;
 
 /**
- * The API server's elapsedSeconds only refreshes on play/pause/seek, not as
- * the song progresses - so between those events it stays frozen. We anchor
- * the last reported value to wall-clock time and advance it ourselves while
- * playing. A new videoId, a changed elapsedSeconds, or a play/pause flip all
- * re-anchor.
+ * The API server's elapsedSeconds is an integer that only changes on
+ * play/pause/track change (plus once a second if some other YTM plugin turned
+ * on its time listener) - it does not advance as the song plays. So we keep
+ * our own clock: anchor the reported value to wall-clock time and extrapolate
+ * while playing. Because reports are floored, a new report that our clock
+ * agrees with (our estimate falls inside that whole second) keeps the
+ * sub-second precision we already have; only a report the clock can't explain
+ * (a seek, a repeat, a stale clock) hard re-anchors.
  */
-let ytmAnchor: {
+interface YtmAnchor {
   key: string;
-  elapsed: number;
+  reported: number;
+  position: number;
   isPaused: boolean;
   anchoredAt: number;
-} | null = null;
+}
+let ytmAnchor: YtmAnchor | null = null;
 
-function extrapolateYtmPosition(
+function ytmPositionAt(anchor: YtmAnchor, now: number): number {
+  if (anchor.isPaused) return anchor.position;
+  return anchor.position + (now - anchor.anchoredAt) / 1000;
+}
+
+function updateYtmAnchor(
   key: string,
-  reportedElapsed: number,
+  reported: number,
   isPaused: boolean,
   duration: number,
 ): number {
   const now = Date.now();
+  const prev = ytmAnchor;
+  let anchor: YtmAnchor;
   if (
-    !ytmAnchor ||
-    ytmAnchor.key !== key ||
-    ytmAnchor.elapsed !== reportedElapsed ||
-    ytmAnchor.isPaused !== isPaused
+    prev &&
+    prev.key === key &&
+    prev.reported === reported &&
+    prev.isPaused === isPaused
   ) {
-    ytmAnchor = { key, elapsed: reportedElapsed, isPaused, anchoredAt: now };
+    // Nothing new: keep extrapolating (or stay frozen while paused)
+    anchor = prev;
+  } else if (prev && prev.key === key) {
+    const estimate = ytmPositionAt(prev, now);
+    const agrees = estimate >= reported && estimate < reported + 1;
+    anchor = {
+      key,
+      reported,
+      isPaused,
+      anchoredAt: now,
+      position: agrees ? estimate : reported + YTM_REPORT_BIAS_S,
+    };
+    // Agreeing ticks are the normal path (once a second in the streaming
+    // regime) - only events and corrections are worth a log line
+    if (!agrees || prev.isPaused !== isPaused) {
+      Logger.music.debug(
+        `YouTube Music re-anchored at ${anchor.position.toFixed(2)}s (reported ${reported}s, ${agrees ? 'clock kept' : 'clock reset'}, ${isPaused ? 'paused' : 'playing'})`,
+      );
+    }
+  } else {
+    anchor = {
+      key,
+      reported,
+      isPaused,
+      anchoredAt: now,
+      position: reported + YTM_REPORT_BIAS_S,
+    };
   }
-  if (ytmAnchor.isPaused) return ytmAnchor.elapsed;
-  const position = ytmAnchor.elapsed + (now - ytmAnchor.anchoredAt) / 1000;
-  return duration > 0 ? Math.min(position, duration) : position;
+  ytmAnchor = anchor;
+  const position = ytmPositionAt(anchor, now);
+  return Math.max(0, duration > 0 ? Math.min(position, duration) : position);
+}
+
+/**
+ * Keeps re-reading the API server while it reports a song, so play/pause and
+ * track changes get anchored within one watch interval rather than one poll
+ * interval. Stops by itself once the server reports no song; the next
+ * successful fetch from the regular poll starts it again.
+ */
+function scheduleYtmWatch(): void {
+  if (ytmWatchTimer) return;
+  ytmWatchTimer = setTimeout(() => {
+    ytmWatchTimer = null;
+    fetchYouTubeMusicTrack().catch(() => {});
+  }, YTM_WATCH_INTERVAL_MS);
 }
 
 async function fetchYouTubeMusicTrack(): Promise<TrackData | null> {
@@ -946,24 +1013,20 @@ async function fetchYouTubeMusicTrack(): Promise<TrackData | null> {
   const rawDuration = Number(song.songDuration ?? song.duration ?? 0);
   const duration = Number.isFinite(rawDuration) ? Math.round(rawDuration) : 0;
   const rawElapsed = Number(song.elapsedSeconds ?? song.position ?? 0);
-  const reportedElapsed = Number.isFinite(rawElapsed) ? rawElapsed : 0;
+  const reported = Number.isFinite(rawElapsed) ? rawElapsed : 0;
   const isPaused = song.isPaused === true;
   const anchorKey =
     typeof song.videoId === 'string' && song.videoId
       ? song.videoId
       : `${title}-${artist}`;
-  const position = extrapolateYtmPosition(
-    anchorKey,
-    reportedElapsed,
-    isPaused,
-    duration,
-  );
+  const position = updateYtmAnchor(anchorKey, reported, isPaused, duration);
+  scheduleYtmWatch();
   return {
     title,
     artist,
     album: typeof song.album === 'string' ? song.album : '',
     duration,
-    position: Math.round(position),
+    position: Math.round(position * 100) / 100,
     isPlaying: !isPaused,
     nowPlayingAvailable: true,
     artworkUrl: typeof song.imageSrc === 'string' ? song.imageSrc : undefined,
@@ -2000,6 +2063,7 @@ app.on('before-quit', () => {
   if (pollInterval) {
     clearInterval(pollInterval);
   }
+  if (ytmWatchTimer) clearTimeout(ytmWatchTimer);
   stopLyricsSync(); // Clean up lyrics sync interval
   if (cachedScriptPath) {
     try {
