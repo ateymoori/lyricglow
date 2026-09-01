@@ -692,8 +692,24 @@ function handleTrayLyricsUpdate(text: string): void {
   updateTrayLyrics(text);
 }
 
+/**
+ * True if a player app is installed. The poll script is COMPILED by osascript,
+ * and terminology like Spotify's \`player state\` only resolves when the app's
+ * scripting dictionary is present on disk. Including a block for a missing app
+ * makes the whole script fail to compile (error -2741), which kills detection
+ * for every player. So each block is included only when its app exists.
+ */
+function isAppInstalled(appName: string): boolean {
+  const candidates = [
+    `/Applications/${appName}.app`,
+    `/System/Applications/${appName}.app`,
+    path.join(app.getPath('home'), 'Applications', `${appName}.app`),
+  ];
+  return candidates.some((p) => fs.existsSync(p));
+}
+
 function initCachedScript(): void {
-  const script = `set output to "{}"
+  const scriptHeader = `set output to "{}"
 
 on escapeJSON(txt)
   set txt to txt as text
@@ -720,7 +736,9 @@ on escapeJSON(txt)
   set AppleScript's text item delimiters to ""
   return txt
 end escapeJSON
+`;
 
+  const spotifyBlock = `
 if application "Spotify" is running then
   try
     tell application "Spotify"
@@ -755,7 +773,9 @@ if application "Spotify" is running then
     end tell
   end try
 end if
+`;
 
+  const musicBlock = `
 if application "Music" is running then
   try
     tell application "Music"
@@ -798,8 +818,21 @@ if application "Music" is running then
     end tell
   end try
 end if
+`;
 
-return output`;
+  const parts = [scriptHeader];
+  if (isAppInstalled('Spotify')) {
+    parts.push(spotifyBlock);
+  } else {
+    Logger.app.info('Spotify not installed - skipping its detection block');
+  }
+  if (isAppInstalled('Music')) {
+    parts.push(musicBlock);
+  } else {
+    Logger.app.info('Music.app not installed - skipping its detection block');
+  }
+  parts.push('\nreturn output');
+  const script = parts.join('');
 
   // Kept in the app's own data directory, not the shared temp dir: anything
   // running as this user could otherwise swap the file between the write and
@@ -820,6 +853,172 @@ return output`;
   Logger.app.info('AppleScript cached for polling');
 }
 
+/**
+ * YouTube Music Desktop (th-ch/youtube-music, now Pear Desktop) has no
+ * AppleScript dictionary - it's an Electron app - so it can't be detected by
+ * the poll script. It does ship an "API Server" plugin exposing now-playing
+ * data (including playback position, which synced lyrics require) over
+ * localhost HTTP. We query it as a fallback whenever AppleScript finds no
+ * track. Requires the user to enable the plugin (auth: none) in that app.
+ */
+const YTM_API_URL = 'http://127.0.0.1:26538/api/v1/song';
+const YTM_BACKOFF_MS = 30_000;
+let ytmUnavailableUntil = 0;
+let ytmLoggedAvailable = false;
+
+/**
+ * The API server's elapsedSeconds only refreshes on play/pause/seek, not as
+ * the song progresses - so between those events it stays frozen. We anchor
+ * the last reported value to wall-clock time and advance it ourselves while
+ * playing. A new videoId, a changed elapsedSeconds, or a play/pause flip all
+ * re-anchor.
+ */
+let ytmAnchor: {
+  key: string;
+  elapsed: number;
+  isPaused: boolean;
+  anchoredAt: number;
+} | null = null;
+
+function extrapolateYtmPosition(
+  key: string,
+  reportedElapsed: number,
+  isPaused: boolean,
+  duration: number,
+): number {
+  const now = Date.now();
+  if (
+    !ytmAnchor ||
+    ytmAnchor.key !== key ||
+    ytmAnchor.elapsed !== reportedElapsed ||
+    ytmAnchor.isPaused !== isPaused
+  ) {
+    ytmAnchor = { key, elapsed: reportedElapsed, isPaused, anchoredAt: now };
+  }
+  if (ytmAnchor.isPaused) return ytmAnchor.elapsed;
+  const position = ytmAnchor.elapsed + (now - ytmAnchor.anchoredAt) / 1000;
+  return duration > 0 ? Math.min(position, duration) : position;
+}
+
+async function fetchYouTubeMusicTrack(): Promise<TrackData | null> {
+  if (Date.now() < ytmUnavailableUntil) return null;
+
+  let res: Response;
+  try {
+    res = await fetch(YTM_API_URL, { signal: AbortSignal.timeout(1500) });
+  } catch {
+    // Server not running (app closed / plugin disabled) - back off quietly
+    ytmUnavailableUntil = Date.now() + YTM_BACKOFF_MS;
+    ytmLoggedAvailable = false;
+    return null;
+  }
+
+  // Server is up from here on - no backoff, so a song starting is picked up
+  // on the next poll
+  if (res.status === 204) return null;
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      // Plugin requires auth; needs "authorization: none" in its settings
+      ytmUnavailableUntil = Date.now() + YTM_BACKOFF_MS;
+      Logger.music.warn(
+        'YouTube Music API server requires authorization - set the API Server plugin auth strategy to "none"',
+      );
+    }
+    return null;
+  }
+
+  let song: Record<string, unknown>;
+  try {
+    song = (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const title = typeof song.title === 'string' ? song.title.trim() : '';
+  const artist = typeof song.artist === 'string' ? song.artist.trim() : '';
+  if (!title || !artist) return null;
+
+  if (!ytmLoggedAvailable) {
+    ytmLoggedAvailable = true;
+    Logger.music.info('YouTube Music detected via API server');
+  }
+
+  const rawDuration = Number(song.songDuration ?? song.duration ?? 0);
+  const duration = Number.isFinite(rawDuration) ? Math.round(rawDuration) : 0;
+  const rawElapsed = Number(song.elapsedSeconds ?? song.position ?? 0);
+  const reportedElapsed = Number.isFinite(rawElapsed) ? rawElapsed : 0;
+  const isPaused = song.isPaused === true;
+  const anchorKey =
+    typeof song.videoId === 'string' && song.videoId
+      ? song.videoId
+      : `${title}-${artist}`;
+  const position = extrapolateYtmPosition(
+    anchorKey,
+    reportedElapsed,
+    isPaused,
+    duration,
+  );
+  return {
+    title,
+    artist,
+    album: typeof song.album === 'string' ? song.album : '',
+    duration,
+    position: Math.round(position),
+    isPlaying: !isPaused,
+    nowPlayingAvailable: true,
+    artworkUrl: typeof song.imageSrc === 'string' ? song.imageSrc : undefined,
+  };
+}
+
+/**
+ * Shared handling for a freshly polled track, regardless of which source
+ * (AppleScript or the YouTube Music API server) produced it.
+ */
+function processTrackData(trackData: TrackData): void {
+  const trackKey = `${trackData.title}-${trackData.artist}`;
+  const dataChanged =
+    !lastTrackData ||
+    lastTrackData.title !== trackData.title ||
+    lastTrackData.artist !== trackData.artist ||
+    lastTrackData.isPlaying !== trackData.isPlaying ||
+    Math.abs((lastTrackData.position || 0) - (trackData.position || 0)) > 2;
+
+  // Re-anchor the interpolated clock on every poll, even when nothing
+  // changed enough to broadcast - the tray schedule depends on it
+  if (currentTrackKey === trackKey) {
+    updateInternalPosition(trackData.position, trackData.isPlaying);
+  }
+
+  if (dataChanged) {
+    lastTrackData = trackData;
+    broadcastMusicUpdate(trackData);
+  }
+
+  updatePollInterval(trackData);
+}
+
+/**
+ * AppleScript found no playing track (or failed): fall back to the YouTube
+ * Music API server before reporting silence. broadcastNullOnFail mirrors the
+ * two pre-existing code paths: empty output broadcast null, exec errors
+ * didn't.
+ */
+function handleNoAppleScriptTrack(broadcastNullOnFail: boolean): void {
+  fetchYouTubeMusicTrack()
+    .then((trackData) => {
+      if (trackData) {
+        processTrackData(trackData);
+        return;
+      }
+      if (broadcastNullOnFail) broadcastMusicUpdate(null);
+      updatePollInterval(null);
+    })
+    .catch(() => {
+      if (broadcastNullOnFail) broadcastMusicUpdate(null);
+      updatePollInterval(null);
+    });
+}
+
 function pollMusicState(): void {
   if (!cachedScriptPath) {
     Logger.music.error('Cached script not initialized');
@@ -829,7 +1028,7 @@ function pollMusicState(): void {
   exec(`osascript "${cachedScriptPath}"`, (error, stdout, stderr) => {
     if (error) {
       Logger.music.error('AppleScript execution failed', error);
-      updatePollInterval(null);
+      handleNoAppleScriptTrack(false);
       return;
     }
 
@@ -867,33 +1066,13 @@ function pollMusicState(): void {
     }
 
     if (!scriptOutput || scriptOutput === '{}') {
-      broadcastMusicUpdate(null);
-      updatePollInterval(null);
+      handleNoAppleScriptTrack(true);
       return;
     }
 
     try {
       const trackData = JSON.parse(scriptOutput) as TrackData;
-      const trackKey = `${trackData.title}-${trackData.artist}`;
-      const dataChanged =
-        !lastTrackData ||
-        lastTrackData.title !== trackData.title ||
-        lastTrackData.artist !== trackData.artist ||
-        lastTrackData.isPlaying !== trackData.isPlaying ||
-        Math.abs((lastTrackData.position || 0) - (trackData.position || 0)) > 2;
-
-      // Re-anchor the interpolated clock on every poll, even when nothing
-      // changed enough to broadcast - the tray schedule depends on it
-      if (currentTrackKey === trackKey) {
-        updateInternalPosition(trackData.position, trackData.isPlaying);
-      }
-
-      if (dataChanged) {
-        lastTrackData = trackData;
-        broadcastMusicUpdate(trackData);
-      }
-
-      updatePollInterval(trackData);
+      processTrackData(trackData);
     } catch (e) {
       Logger.music.error('Failed to parse music data', e as Error);
       updatePollInterval(null);
