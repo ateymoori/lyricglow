@@ -692,8 +692,24 @@ function handleTrayLyricsUpdate(text: string): void {
   updateTrayLyrics(text);
 }
 
+/**
+ * True if a player app is installed. The poll script is COMPILED by osascript,
+ * and terminology like Spotify's \`player state\` only resolves when the app's
+ * scripting dictionary is present on disk. Including a block for a missing app
+ * makes the whole script fail to compile (error -2741), which kills detection
+ * for every player. So each block is included only when its app exists.
+ */
+function isAppInstalled(appName: string): boolean {
+  const candidates = [
+    `/Applications/${appName}.app`,
+    `/System/Applications/${appName}.app`,
+    path.join(app.getPath('home'), 'Applications', `${appName}.app`),
+  ];
+  return candidates.some((p) => fs.existsSync(p));
+}
+
 function initCachedScript(): void {
-  const script = `set output to "{}"
+  const scriptHeader = `set output to "{}"
 
 on escapeJSON(txt)
   set txt to txt as text
@@ -720,7 +736,9 @@ on escapeJSON(txt)
   set AppleScript's text item delimiters to ""
   return txt
 end escapeJSON
+`;
 
+  const spotifyBlock = `
 if application "Spotify" is running then
   try
     tell application "Spotify"
@@ -755,7 +773,9 @@ if application "Spotify" is running then
     end tell
   end try
 end if
+`;
 
+  const musicBlock = `
 if application "Music" is running then
   try
     tell application "Music"
@@ -798,8 +818,21 @@ if application "Music" is running then
     end tell
   end try
 end if
+`;
 
-return output`;
+  const parts = [scriptHeader];
+  if (isAppInstalled('Spotify')) {
+    parts.push(spotifyBlock);
+  } else {
+    Logger.app.info('Spotify not installed - skipping its detection block');
+  }
+  if (isAppInstalled('Music')) {
+    parts.push(musicBlock);
+  } else {
+    Logger.app.info('Music.app not installed - skipping its detection block');
+  }
+  parts.push('\nreturn output');
+  const script = parts.join('');
 
   // Kept in the app's own data directory, not the shared temp dir: anything
   // running as this user could otherwise swap the file between the write and
@@ -820,6 +853,235 @@ return output`;
   Logger.app.info('AppleScript cached for polling');
 }
 
+/**
+ * YouTube Music Desktop (th-ch/youtube-music, now Pear Desktop) has no
+ * AppleScript dictionary - it's an Electron app - so it can't be detected by
+ * the poll script. It does ship an "API Server" plugin exposing now-playing
+ * data (including playback position, which synced lyrics require) over
+ * localhost HTTP. We query it as a fallback whenever AppleScript finds no
+ * track. Requires the user to enable the plugin (auth: none) in that app.
+ */
+const YTM_API_URL = 'http://127.0.0.1:26538/api/v1/song';
+const YTM_BACKOFF_MS = 30_000;
+/**
+ * While the API server reports a song we re-read it this often, on top of the
+ * regular poll, purely to keep the position anchor fresh (see
+ * updateYtmAnchor). It's a localhost request for ~1KB of JSON, so it's cheap,
+ * and it bounds how late we notice a play/pause/track change.
+ */
+const YTM_WATCH_INTERVAL_MS = 500;
+/**
+ * elapsedSeconds is floored to whole seconds (the truth is on average 0.5s
+ * ahead) and we see each change up to one watch interval late (on average
+ * half of it) - so this is the expected true position when we (re)anchor to
+ * a fresh report.
+ */
+const YTM_REPORT_BIAS_S = 0.5 + YTM_WATCH_INTERVAL_MS / 2000;
+let ytmUnavailableUntil = 0;
+let ytmLoggedAvailable = false;
+let ytmWatchTimer: NodeJS.Timeout | null = null;
+
+/**
+ * The API server's elapsedSeconds is an integer that only changes on
+ * play/pause/track change (plus once a second if some other YTM plugin turned
+ * on its time listener) - it does not advance as the song plays. So we keep
+ * our own clock: anchor the reported value to wall-clock time and extrapolate
+ * while playing. Because reports are floored, a new report that our clock
+ * agrees with (our estimate falls inside that whole second) keeps the
+ * sub-second precision we already have; only a report the clock can't explain
+ * (a seek, a repeat, a stale clock) hard re-anchors.
+ */
+interface YtmAnchor {
+  key: string;
+  reported: number;
+  position: number;
+  isPaused: boolean;
+  anchoredAt: number;
+}
+let ytmAnchor: YtmAnchor | null = null;
+
+function ytmPositionAt(anchor: YtmAnchor, now: number): number {
+  if (anchor.isPaused) return anchor.position;
+  return anchor.position + (now - anchor.anchoredAt) / 1000;
+}
+
+function updateYtmAnchor(
+  key: string,
+  reported: number,
+  isPaused: boolean,
+  duration: number,
+): number {
+  const now = Date.now();
+  const prev = ytmAnchor;
+  let anchor: YtmAnchor;
+  if (
+    prev &&
+    prev.key === key &&
+    prev.reported === reported &&
+    prev.isPaused === isPaused
+  ) {
+    // Nothing new: keep extrapolating (or stay frozen while paused)
+    anchor = prev;
+  } else if (prev && prev.key === key) {
+    const estimate = ytmPositionAt(prev, now);
+    const agrees = estimate >= reported && estimate < reported + 1;
+    anchor = {
+      key,
+      reported,
+      isPaused,
+      anchoredAt: now,
+      position: agrees ? estimate : reported + YTM_REPORT_BIAS_S,
+    };
+    // Agreeing ticks are the normal path (once a second in the streaming
+    // regime) - only events and corrections are worth a log line
+    if (!agrees || prev.isPaused !== isPaused) {
+      Logger.music.debug(
+        `YouTube Music re-anchored at ${anchor.position.toFixed(2)}s (reported ${reported}s, ${agrees ? 'clock kept' : 'clock reset'}, ${isPaused ? 'paused' : 'playing'})`,
+      );
+    }
+  } else {
+    anchor = {
+      key,
+      reported,
+      isPaused,
+      anchoredAt: now,
+      position: reported + YTM_REPORT_BIAS_S,
+    };
+  }
+  ytmAnchor = anchor;
+  const position = ytmPositionAt(anchor, now);
+  return Math.max(0, duration > 0 ? Math.min(position, duration) : position);
+}
+
+/**
+ * Keeps re-reading the API server while it reports a song, so play/pause and
+ * track changes get anchored within one watch interval rather than one poll
+ * interval. Stops by itself once the server reports no song; the next
+ * successful fetch from the regular poll starts it again.
+ */
+function scheduleYtmWatch(): void {
+  if (ytmWatchTimer) return;
+  ytmWatchTimer = setTimeout(() => {
+    ytmWatchTimer = null;
+    fetchYouTubeMusicTrack().catch(() => {});
+  }, YTM_WATCH_INTERVAL_MS);
+}
+
+async function fetchYouTubeMusicTrack(): Promise<TrackData | null> {
+  if (Date.now() < ytmUnavailableUntil) return null;
+
+  let res: Response;
+  try {
+    res = await fetch(YTM_API_URL, { signal: AbortSignal.timeout(1500) });
+  } catch {
+    // Server not running (app closed / plugin disabled) - back off quietly
+    ytmUnavailableUntil = Date.now() + YTM_BACKOFF_MS;
+    ytmLoggedAvailable = false;
+    return null;
+  }
+
+  // Server is up from here on - no backoff, so a song starting is picked up
+  // on the next poll
+  if (res.status === 204) return null;
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      // Plugin requires auth; needs "authorization: none" in its settings
+      ytmUnavailableUntil = Date.now() + YTM_BACKOFF_MS;
+      Logger.music.warn(
+        'YouTube Music API server requires authorization - set the API Server plugin auth strategy to "none"',
+      );
+    }
+    return null;
+  }
+
+  let song: Record<string, unknown>;
+  try {
+    song = (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const title = typeof song.title === 'string' ? song.title.trim() : '';
+  const artist = typeof song.artist === 'string' ? song.artist.trim() : '';
+  if (!title || !artist) return null;
+
+  if (!ytmLoggedAvailable) {
+    ytmLoggedAvailable = true;
+    Logger.music.info('YouTube Music detected via API server');
+  }
+
+  const rawDuration = Number(song.songDuration ?? song.duration ?? 0);
+  const duration = Number.isFinite(rawDuration) ? Math.round(rawDuration) : 0;
+  const rawElapsed = Number(song.elapsedSeconds ?? song.position ?? 0);
+  const reported = Number.isFinite(rawElapsed) ? rawElapsed : 0;
+  const isPaused = song.isPaused === true;
+  const anchorKey =
+    typeof song.videoId === 'string' && song.videoId
+      ? song.videoId
+      : `${title}-${artist}`;
+  const position = updateYtmAnchor(anchorKey, reported, isPaused, duration);
+  scheduleYtmWatch();
+  return {
+    title,
+    artist,
+    album: typeof song.album === 'string' ? song.album : '',
+    duration,
+    position: Math.round(position * 100) / 100,
+    isPlaying: !isPaused,
+    nowPlayingAvailable: true,
+    artworkUrl: typeof song.imageSrc === 'string' ? song.imageSrc : undefined,
+  };
+}
+
+/**
+ * Shared handling for a freshly polled track, regardless of which source
+ * (AppleScript or the YouTube Music API server) produced it.
+ */
+function processTrackData(trackData: TrackData): void {
+  const trackKey = `${trackData.title}-${trackData.artist}`;
+  const dataChanged =
+    !lastTrackData ||
+    lastTrackData.title !== trackData.title ||
+    lastTrackData.artist !== trackData.artist ||
+    lastTrackData.isPlaying !== trackData.isPlaying ||
+    Math.abs((lastTrackData.position || 0) - (trackData.position || 0)) > 2;
+
+  // Re-anchor the interpolated clock on every poll, even when nothing
+  // changed enough to broadcast - the tray schedule depends on it
+  if (currentTrackKey === trackKey) {
+    updateInternalPosition(trackData.position, trackData.isPlaying);
+  }
+
+  if (dataChanged) {
+    lastTrackData = trackData;
+    broadcastMusicUpdate(trackData);
+  }
+
+  updatePollInterval(trackData);
+}
+
+/**
+ * AppleScript found no playing track (or failed): fall back to the YouTube
+ * Music API server before reporting silence. broadcastNullOnFail mirrors the
+ * two pre-existing code paths: empty output broadcast null, exec errors
+ * didn't.
+ */
+function handleNoAppleScriptTrack(broadcastNullOnFail: boolean): void {
+  fetchYouTubeMusicTrack()
+    .then((trackData) => {
+      if (trackData) {
+        processTrackData(trackData);
+        return;
+      }
+      if (broadcastNullOnFail) broadcastMusicUpdate(null);
+      updatePollInterval(null);
+    })
+    .catch(() => {
+      if (broadcastNullOnFail) broadcastMusicUpdate(null);
+      updatePollInterval(null);
+    });
+}
+
 function pollMusicState(): void {
   if (!cachedScriptPath) {
     Logger.music.error('Cached script not initialized');
@@ -829,7 +1091,7 @@ function pollMusicState(): void {
   exec(`osascript "${cachedScriptPath}"`, (error, stdout, stderr) => {
     if (error) {
       Logger.music.error('AppleScript execution failed', error);
-      updatePollInterval(null);
+      handleNoAppleScriptTrack(false);
       return;
     }
 
@@ -867,33 +1129,13 @@ function pollMusicState(): void {
     }
 
     if (!scriptOutput || scriptOutput === '{}') {
-      broadcastMusicUpdate(null);
-      updatePollInterval(null);
+      handleNoAppleScriptTrack(true);
       return;
     }
 
     try {
       const trackData = JSON.parse(scriptOutput) as TrackData;
-      const trackKey = `${trackData.title}-${trackData.artist}`;
-      const dataChanged =
-        !lastTrackData ||
-        lastTrackData.title !== trackData.title ||
-        lastTrackData.artist !== trackData.artist ||
-        lastTrackData.isPlaying !== trackData.isPlaying ||
-        Math.abs((lastTrackData.position || 0) - (trackData.position || 0)) > 2;
-
-      // Re-anchor the interpolated clock on every poll, even when nothing
-      // changed enough to broadcast - the tray schedule depends on it
-      if (currentTrackKey === trackKey) {
-        updateInternalPosition(trackData.position, trackData.isPlaying);
-      }
-
-      if (dataChanged) {
-        lastTrackData = trackData;
-        broadcastMusicUpdate(trackData);
-      }
-
-      updatePollInterval(trackData);
+      processTrackData(trackData);
     } catch (e) {
       Logger.music.error('Failed to parse music data', e as Error);
       updatePollInterval(null);
@@ -1821,6 +2063,7 @@ app.on('before-quit', () => {
   if (pollInterval) {
     clearInterval(pollInterval);
   }
+  if (ytmWatchTimer) clearTimeout(ytmWatchTimer);
   stopLyricsSync(); // Clean up lyrics sync interval
   if (cachedScriptPath) {
     try {
